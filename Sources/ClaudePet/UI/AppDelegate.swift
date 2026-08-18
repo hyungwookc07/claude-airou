@@ -28,7 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             pet: selectedPet.definition,
             pixelScale: CGFloat(config.pixelScale),
             isSpeechBubbleHidden: config.isSpeechBubbleHidden,
-            isAlwaysFannedOut: config.isSessionsAlwaysExpanded
+            isAlwaysFannedOut: config.isSessionsAlwaysExpanded,
+            gaugeMetric: config.gaugeMetric
         )
 
         panel = OverlayPanel(contentSize: viewModel.contentSize, rootView: PetView(model: viewModel))
@@ -167,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if let usageSummary = viewModel.usageSummary(for: viewModel.focusedSession?.sessionId) {
+            let usageItem = NSMenuItem(title: usageSummary, action: nil, keyEquivalent: "")
+            usageItem.isEnabled = false
+            menu.addItem(usageItem)
+        }
 
         if !viewModel.sessions.isEmpty {
             let sessionsMenu = NSMenu()
@@ -190,6 +196,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessionsItem.submenu = sessionsMenu
             menu.addItem(sessionsItem)
         }
+
+        // Gauge metric
+        let gaugeMenu = NSMenu()
+        for metric in GaugeMetric.allCases {
+            let item = NSMenuItem(title: metric.menuTitle, action: #selector(selectGaugeMetricMenuItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = metric.rawValue
+            item.state = metric == config.gaugeMetric ? .on : .off
+            gaugeMenu.addItem(item)
+        }
+        gaugeMenu.addItem(.separator())
+        gaugeMenu.addItem(makeItem("Feed from Claude Code status line…", action: #selector(installStatusLine)))
+        let gaugeItem = NSMenuItem(title: "Gauge", action: nil, keyEquivalent: "")
+        gaugeItem.submenu = gaugeMenu
+        menu.addItem(gaugeItem)
 
         let expandItem = makeItem("Show all sessions side by side", action: #selector(toggleAlwaysExpanded))
         expandItem.state = config.isSessionsAlwaysExpanded ? .on : .off
@@ -302,6 +323,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func followSessionsAutomatically() {
         viewModel.pin(sessionId: nil)
+    }
+
+    @objc private func selectGaugeMetricMenuItem(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let metric = GaugeMetric(rawValue: raw) else { return }
+        config.gaugeMetric = metric
+        viewModel.gaugeMetric = metric
+        config.save()
+    }
+
+    @objc private func installStatusLine() {
+        let alert = NSAlert()
+        do {
+            let report = try StatusLineInstaller().install()
+            alert.messageText = "Status line wired to claude-pet"
+            alert.informativeText = report.summaryText + "\n\nNew Claude Code sessions feed the gauge; your own status line keeps rendering."
+        } catch {
+            alert.alertStyle = .warning
+            alert.messageText = "Could not install the status line feed"
+            alert.informativeText = error.localizedDescription
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func toggleAlwaysExpanded() {

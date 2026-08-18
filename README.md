@@ -27,6 +27,7 @@ Requirements: macOS 14+, a Swift 5.9+ toolchain (Xcode or the Command Line Tools
 git clone <this repo> && cd claude-pet
 make install      # → ~/.local/bin/claude-pet
 make hooks        # registers the hook in ~/.claude/settings.json (a backup is written first)
+make statusline   # optional: feeds the battery gauge from the Claude Code status line (see below)
 make skill        # optional: installs the /hatch-pet skill into ~/.claude/skills
 claude-pet        # start the overlay (menu bar 🐾 icon + the pet)
 ```
@@ -82,7 +83,15 @@ claude-pet install-hooks [--print]   / uninstall-hooks
 ```
 
 **Click** the pet to pet it (hearts + a line of dialogue), **drag** to move, **right-click** (or the menu bar 🐾) for the menu:
-choose pet · size (Small/Medium/Large) · sessions (pin one) · show all sessions side by side · hide speech bubbles · click-through · hide pet · reset position · install hooks · open hook log.
+choose pet · size (Small/Medium/Large) · sessions (pin one) · gauge metric · show all sessions side by side · hide speech bubbles · click-through · hide pet · reset position · install hooks · open hook log.
+
+Under each pet: a **battery gauge** (context window remaining by default; switch to the 5-hour / 7-day rate-limit remaining or off in menu → Gauge) and the **session label with the status icon** (red clock = waiting for approval, ⚙️ working, ✅ done, …).
+
+### Battery gauge
+
+Claude Code hands its status line a JSON with `context_window.used_percentage`, `rate_limits.five_hour / seven_day` and `cost`. `make statusline` (or `claude-pet install-statusline`) sets `settings.statusLine` to `claude-pet statusline`, which records those figures per session and then **runs your original status line command with the same stdin** — so your terminal status line looks exactly as before. The original is kept in `~/.claude-pet/statusline-passthrough.json`; `claude-pet uninstall-statusline` restores it.
+
+Sessions that never run a status line (e.g. some desktop-app sessions) still get a context gauge: the hook estimates it from the last assistant message's token usage in the transcript. Rate limits are only known through the status line.
 
 ### Several sessions at once
 

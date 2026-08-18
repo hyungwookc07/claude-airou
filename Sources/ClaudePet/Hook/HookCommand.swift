@@ -21,6 +21,8 @@ enum HookCommand {
             return 0
         }
 
+        refreshUsageEstimateIfRelevant(input: input, stateStore: stateStore)
+
         let mapping = HookEventMapper.map(input)
         switch mapping {
         case .ignore:
@@ -53,6 +55,16 @@ enum HookCommand {
             }
         }
         return 0
+    }
+
+    /// Fallback context gauge for sessions without a status line: estimate from the transcript.
+    /// `mergeUsage` refuses to overwrite a recent status-line reading.
+    private static func refreshUsageEstimateIfRelevant(input: HookInput, stateStore: SessionStateStore) {
+        guard TranscriptContextEstimator.refreshingEventNames.contains(input.hookEventName),
+              !input.isSubagentEvent,
+              let transcriptPath = input.transcriptPath,
+              let estimate = TranscriptContextEstimator.estimate(transcriptPath: transcriptPath, sessionId: input.sessionId) else { return }
+        try? stateStore.mergeUsage(estimate)
     }
 
     // MARK: - Logging

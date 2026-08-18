@@ -15,6 +15,11 @@ enum CommandLineInterface {
                                        Merge hook entries into ~/.claude/settings.json (backup first)
                                        --print only prints the JSON snippet, changes nothing
       claude-pet uninstall-hooks [--settings PATH]
+      claude-pet install-statusline [--settings PATH]
+                                       Feed the usage gauge from the Claude Code status line; your
+                                       existing status line keeps running (passthrough)
+      claude-pet uninstall-statusline  Restore the original status line
+      claude-pet statusline            Status line entry point (reads the status line JSON on stdin)
       claude-pet simulate STATE [--message TEXT] [--session ID] [--cwd PATH]
                                        Write a fake session so you can see the pet react
                                        STATE: \(PetState.allCases.map(\.rawValue).joined(separator: " | ")) | clear | demo
@@ -35,6 +40,7 @@ enum CommandLineInterface {
       ~/.claude-pet/pets/*.json        your custom pets (see skills/hatch-pet)
       ~/.claude-pet/state/*.json       live session state written by the hook
       ~/.claude-pet/hook.log           what the hook saw (auto-truncated)
+      ~/.claude-pet/statusline-passthrough.json   your original statusLine while claude-pet's is installed
     """
 
     struct ParsedArguments {
@@ -98,6 +104,12 @@ enum CommandLineInterface {
             return nil
         case "hook":
             return HookCommand.run()
+        case "statusline":
+            return StatusLineCommand.run(arguments: arguments)
+        case "install-statusline":
+            return runInstallStatusLine(parsed)
+        case "uninstall-statusline":
+            return runUninstallStatusLine(parsed)
         case "install-hooks":
             return runInstallHooks(parsed)
         case "uninstall-hooks":
@@ -154,6 +166,32 @@ enum CommandLineInterface {
             return 0
         } catch {
             StandardError.print("claude-pet: install failed: \(error.localizedDescription)")
+            return 1
+        }
+    }
+
+    private static func runInstallStatusLine(_ parsed: ParsedArguments) -> Int32 {
+        let installer = StatusLineInstaller(settingsURL: settingsURL(from: parsed))
+        do {
+            let report = try installer.install()
+            print("Claude Code status line wired to claude-pet.")
+            print(report.summaryText)
+            print("\nNew Claude Code sessions will feed the usage gauge; your own status line keeps rendering through the passthrough.")
+            return 0
+        } catch {
+            StandardError.print("claude-pet: install-statusline failed: \(error.localizedDescription)")
+            return 1
+        }
+    }
+
+    private static func runUninstallStatusLine(_ parsed: ParsedArguments) -> Int32 {
+        let installer = StatusLineInstaller(settingsURL: settingsURL(from: parsed))
+        do {
+            let report = try installer.uninstall()
+            print(report.summaryText)
+            return 0
+        } catch {
+            StandardError.print("claude-pet: uninstall-statusline failed: \(error.localizedDescription)")
             return 1
         }
     }
@@ -444,9 +482,19 @@ enum CommandLineInterface {
             print("No sessions in \(store.directory.path)")
             return 0
         }
+        let usageBySession = store.loadAllUsage()
         for session in sessions {
             let age = Int(session.ageSeconds)
-            print("\(session.sessionId)\t\(session.projectName)\t\(session.state.rawValue) → \(session.effectiveState.rawValue)\t\(age)s ago\t\(session.message)")
+            var usageText = ""
+            if let usage = usageBySession[session.sessionId] {
+                var parts: [String] = []
+                if let ctx = usage.contextUsedPercentage { parts.append("ctx \(Int(ctx.rounded()))%") }
+                if let five = usage.fiveHourUsedPercentage { parts.append("5h \(Int(five.rounded()))%") }
+                if let seven = usage.sevenDayUsedPercentage { parts.append("7d \(Int(seven.rounded()))%") }
+                parts.append(usage.source.rawValue)
+                usageText = "\t[" + parts.joined(separator: " ") + "]"
+            }
+            print("\(session.sessionId)\t\(session.projectName)\t\(session.state.rawValue) → \(session.effectiveState.rawValue)\t\(age)s ago\t\(session.message)\(usageText)")
         }
         return 0
     }

@@ -20,6 +20,8 @@ struct AppConfig: Codable, Equatable {
     var isPetHidden: Bool = false
     /// Show one pet per session all the time instead of only after a click.
     var isSessionsAlwaysExpanded: Bool = false
+    /// What the battery gauge shows.
+    var gaugeMetric: GaugeMetric = .contextRemaining
 
     init() {}
 
@@ -35,6 +37,7 @@ struct AppConfig: Codable, Equatable {
         isClickThrough = try container.decodeIfPresent(Bool.self, forKey: .isClickThrough) ?? false
         isPetHidden = try container.decodeIfPresent(Bool.self, forKey: .isPetHidden) ?? false
         isSessionsAlwaysExpanded = try container.decodeIfPresent(Bool.self, forKey: .isSessionsAlwaysExpanded) ?? false
+        gaugeMetric = try container.decodeIfPresent(GaugeMetric.self, forKey: .gaugeMetric) ?? .contextRemaining
     }
 
     static func load(from url: URL = AppPaths.configFile) -> AppConfig {

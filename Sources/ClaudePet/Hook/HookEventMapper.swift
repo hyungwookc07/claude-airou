@@ -23,6 +23,7 @@ struct HookInput {
     var sessionId: String { string("session_id") ?? "unknown-session" }
     var cwd: String { string("cwd") ?? FileManager.default.currentDirectoryPath }
     var hookEventName: String { string("hook_event_name") ?? "" }
+    var transcriptPath: String? { string("transcript_path") }
     var toolName: String? { string("tool_name") }
     var toolInput: [String: Any] { rawObject["tool_input"] as? [String: Any] ?? [:] }
     var toolUseId: String? { string("tool_use_id") }
@@ -192,7 +193,8 @@ enum HookEventMapper {
 
 /// Turns a tool call into a short, human-readable speech bubble line.
 enum ToolSummarizer {
-    private static let maxCharacters = 48
+    /// Two full bubble lines (~300pt wide) hold roughly this much; longer text gets an ellipsis.
+    private static let maxCharacters = 100
 
     static func summarize(toolName: String, toolInput: [String: Any]) -> String {
         func lastPathComponent(_ key: String) -> String? {

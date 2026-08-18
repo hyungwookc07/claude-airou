@@ -37,6 +37,12 @@ final class PetViewModel: ObservableObject {
     /// User-chosen focus (click a side pet / pick from the menu). Overrides the automatic rule.
     @Published private(set) var pinnedSessionId: String?
 
+    /// Usage per session (status line or transcript estimate) for the battery gauge.
+    @Published private(set) var usageBySessionId: [String: SessionUsageSnapshot] = [:]
+    @Published var gaugeMetric: GaugeMetric {
+        didSet { relayoutIfNeeded() }
+    }
+
     /// Current geometry; the panel resizes from this.
     @Published private(set) var layout: RowLayout
     /// Bumped on every layout change so cards can run their entrance / move animation.
@@ -66,6 +72,7 @@ final class PetViewModel: ObservableObject {
         pixelScale: CGFloat,
         isSpeechBubbleHidden: Bool,
         isAlwaysFannedOut: Bool,
+        gaugeMetric: GaugeMetric,
         stateStore: SessionStateStore = SessionStateStore()
     ) {
         self.pet = pet
@@ -73,8 +80,34 @@ final class PetViewModel: ObservableObject {
         self.pixelScale = pixelScale
         self.isSpeechBubbleHidden = isSpeechBubbleHidden
         self.isAlwaysFannedOut = isAlwaysFannedOut
+        self.gaugeMetric = gaugeMetric
         self.stateStore = stateStore
-        self.layout = RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: ["no session"], sessionIds: [nil], primaryIndex: 0)
+        self.layout = RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: ["no session"], sessionIds: [nil], primaryIndex: 0, showsGauge: gaugeMetric != .off)
+    }
+
+    // MARK: - Gauge
+
+    var showsGauge: Bool { gaugeMetric != .off }
+
+    func usage(for card: RowLayout.Card) -> SessionUsageSnapshot? {
+        guard let id = card.sessionId else { return nil }
+        return usageBySessionId[id]
+    }
+
+    /// Remaining percentage for the gauge metric, or nil when unknown.
+    func gaugeValue(for card: RowLayout.Card) -> Double? {
+        gaugeMetric.value(from: usage(for: card))
+    }
+
+    /// One-line usage summary for menus: "ctx 62% left · 5h 71% left · $0.42".
+    func usageSummary(for sessionId: String?) -> String? {
+        guard let sessionId, let usage = usageBySessionId[sessionId] else { return nil }
+        var parts: [String] = []
+        if let ctx = usage.contextRemainingPercentage { parts.append("ctx \(Int(ctx.rounded()))% left") }
+        if let five = usage.fiveHourRemainingPercentage { parts.append("5h \(Int(five.rounded()))% left") }
+        if let seven = usage.sevenDayRemainingPercentage { parts.append("7d \(Int(seven.rounded()))% left") }
+        if let cost = usage.totalCostUSD { parts.append(String(format: "$%.2f", cost)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Speech bubble measurement
@@ -108,7 +141,8 @@ final class PetViewModel: ObservableObject {
             labels: [collapsedLabel],
             sessionIds: [focusedSession?.sessionId],
             primaryIndex: 0,
-            speechBubbleWidth: currentSpeechBubbleWidth
+            speechBubbleWidth: currentSpeechBubbleWidth,
+            showsGauge: showsGauge
         )
     }
 
@@ -185,6 +219,8 @@ final class PetViewModel: ObservableObject {
         let loaded = stateStore.loadAll()
         // Only publish when something actually changed; this runs several times a second.
         if loaded != sessions { sessions = loaded }
+        let loadedUsage = stateStore.loadAllUsage()
+        if loadedUsage != usageBySessionId { usageBySessionId = loadedUsage }
 
         if let pinnedSessionId, !loaded.contains(where: { $0.sessionId == pinnedSessionId }) {
             self.pinnedSessionId = nil // the pinned session ended
@@ -259,7 +295,8 @@ final class PetViewModel: ObservableObject {
                 labels: row.map(\.projectName),
                 sessionIds: row.map { Optional($0.sessionId) },
                 primaryIndex: primaryIndex,
-                speechBubbleWidth: currentSpeechBubbleWidth
+                speechBubbleWidth: currentSpeechBubbleWidth,
+                showsGauge: showsGauge
             )
         } else {
             newLayout = collapsedLayout

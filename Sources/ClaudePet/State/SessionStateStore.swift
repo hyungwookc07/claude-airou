@@ -32,6 +32,56 @@ struct SessionStateStore {
 
     func remove(sessionId: String) {
         try? FileManager.default.removeItem(at: fileURL(forSessionId: sessionId))
+        try? FileManager.default.removeItem(at: usageFileURL(forSessionId: sessionId))
+    }
+
+    // MARK: - Usage (status line / transcript estimate)
+
+    static let usageFileSuffix = ".usage.json"
+
+    func writeUsage(_ usage: SessionUsageSnapshot) throws {
+        try AppPaths.ensureDirectoryExists(directory)
+        let data = try Self.jsonEncoder.encode(usage)
+        try data.write(to: usageFileURL(forSessionId: usage.sessionId), options: .atomic)
+    }
+
+    /// Writes `candidate` unless a fresher, more authoritative reading is already on disk.
+    func mergeUsage(_ candidate: SessionUsageSnapshot) throws {
+        if let existing = readUsage(sessionId: candidate.sessionId), !existing.shouldBeReplaced(by: candidate) {
+            return
+        }
+        try writeUsage(candidate)
+    }
+
+    func readUsage(sessionId: String) -> SessionUsageSnapshot? {
+        guard let data = try? Data(contentsOf: usageFileURL(forSessionId: sessionId)) else { return nil }
+        return try? Self.jsonDecoder.decode(SessionUsageSnapshot.self, from: data)
+    }
+
+    func loadAllUsage() -> [String: SessionUsageSnapshot] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return [:]
+        }
+        var result: [String: SessionUsageSnapshot] = [:]
+        for fileURL in entries where fileURL.lastPathComponent.hasSuffix(Self.usageFileSuffix) {
+            if let modified = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               Date().timeIntervalSince(modified) > Self.staleAfterSeconds {
+                try? FileManager.default.removeItem(at: fileURL)
+                continue
+            }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let usage = try? Self.jsonDecoder.decode(SessionUsageSnapshot.self, from: data) else { continue }
+            result[usage.sessionId] = usage
+        }
+        return result
+    }
+
+    func usageFileURL(forSessionId sessionId: String) -> URL {
+        directory.appendingPathComponent(Self.sanitizeSessionId(sessionId) + Self.usageFileSuffix)
     }
 
     /// The last snapshot written for a session (used by the hook to merge, not just overwrite).
@@ -55,7 +105,7 @@ struct SessionStateStore {
         }
 
         var snapshots: [SessionSnapshot] = []
-        for fileURL in entries where fileURL.pathExtension == "json" {
+        for fileURL in entries where fileURL.pathExtension == "json" && !fileURL.lastPathComponent.hasSuffix(Self.usageFileSuffix) {
             if let modified = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
                Date().timeIntervalSince(modified) > Self.staleAfterSeconds {
                 try? FileManager.default.removeItem(at: fileURL)

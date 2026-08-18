@@ -25,6 +25,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 git clone <this repo> && cd claude-pet
 make install      # → ~/.local/bin/claude-pet
 make hooks        # ~/.claude/settings.json 에 hook 등록 (백업 파일을 먼저 만든다)
+make statusline   # (선택) 배터리 게이지에 Claude Code 상태줄 데이터를 공급 (아래 참고)
 make skill        # (선택) /hatch-pet 스킬을 ~/.claude/skills 에 설치
 claude-pet        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
 ```
@@ -81,7 +82,15 @@ claude-pet install-hooks [--print]   / uninstall-hooks
 ```
 
 펫을 **클릭**하면 쓰다듬기(하트 + 대사), **드래그**하면 이동, **우클릭**하거나 메뉴바 🐾를 누르면 메뉴:
-펫 선택 · 크기(Small/Medium/Large) · 세션(고정) · 세션 전부 펼쳐 보기 · 말풍선 숨기기 · 클릭 통과 · 펫 숨기기 · 위치 초기화 · hook 설치 · 로그 열기.
+펫 선택 · 크기(Small/Medium/Large) · 세션(고정) · 게이지 항목 · 세션 전부 펼쳐 보기 · 말풍선 숨기기 · 클릭 통과 · 펫 숨기기 · 위치 초기화 · hook 설치 · 로그 열기.
+
+펫 아래에는 **배터리 게이지**(기본: 컨텍스트 창 잔량, 메뉴 → Gauge에서 5시간/7일 한도 잔량이나 끄기로 전환)와 **상태 아이콘이 붙은 세션 라벨**(빨간 시계 = 승인 대기, ⚙️ 작업 중, ✅ 완료 …)이 있다.
+
+### 배터리 게이지
+
+Claude Code는 상태줄 명령에 `context_window.used_percentage`, `rate_limits.five_hour / seven_day`, `cost`가 담긴 JSON을 넘긴다. `make statusline`(또는 `claude-pet install-statusline`)은 `settings.statusLine`을 `claude-pet statusline`으로 바꾸는데, 이 명령은 그 수치를 세션별로 기록한 뒤 **원래 쓰던 상태줄 명령을 같은 stdin으로 그대로 실행**한다 — 터미널 상태줄은 전과 똑같이 보인다. 원래 설정은 `~/.claude-pet/statusline-passthrough.json`에 보관되고 `claude-pet uninstall-statusline`으로 복원된다.
+
+상태줄이 돌지 않는 세션(일부 데스크톱 앱 세션 등)도 컨텍스트 게이지는 나온다: hook이 transcript의 마지막 assistant 메시지 토큰 사용량으로 추정한다. 한도(rate limit)는 상태줄로만 알 수 있다.
 
 ### 세션이 여러 개일 때
 

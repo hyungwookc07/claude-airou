@@ -27,6 +27,8 @@ struct RowLayout: Equatable {
     /// Gap between the bubble's tail and the top of the sprite.
     static let speechBubbleBottomInset: CGFloat = 12
     static let sessionBadgeReservedHeight: CGFloat = 22
+    /// Battery gauge row between the sprite and the label (0 when the gauge is off).
+    static let gaugeReservedHeight: CGFloat = 16
     static let verticalPadding: CGFloat = 12
     /// Rough width of one label character at the badge font, for card sizing without text measurement.
     static let approximateLabelCharacterWidth: CGFloat = 6.2
@@ -41,6 +43,12 @@ struct RowLayout: Equatable {
     let primarySpriteSize: CGSize
     /// Width the speech bubble will take for the current text (0 when there is no bubble).
     let speechBubbleWidth: CGFloat
+    /// Whether a gauge row is laid out under the sprites.
+    let showsGauge: Bool
+
+    var gaugeHeight: CGFloat { showsGauge ? Self.gaugeReservedHeight : 0 }
+    /// Height of one card: sprite + gauge + label (+ spacing).
+    var cardHeight: CGFloat { primarySpriteSize.height + gaugeHeight + Self.sessionBadgeReservedHeight + 4 }
 
     var primaryCard: Card { cards.first(where: \.isPrimary) ?? cards[0] }
     var primaryCenterX: CGFloat { primaryCard.centerX }
@@ -57,7 +65,8 @@ struct RowLayout: Equatable {
         labels: [String],
         sessionIds: [String?],
         primaryIndex: Int,
-        speechBubbleWidth: CGFloat = 0
+        speechBubbleWidth: CGFloat = 0,
+        showsGauge: Bool = false
     ) -> RowLayout {
         precondition(labels.count == sessionIds.count && !labels.isEmpty)
         let sideScale = sideScale(for: pixelScale)
@@ -87,7 +96,8 @@ struct RowLayout: Equatable {
         let rightShortfall = max(0, (primaryCenter + leftShortfall + bubbleHalf) - contentWidth)
         contentWidth += rightShortfall
 
-        let contentHeight = speechBubbleReservedHeight + primarySpriteSize.height + sessionBadgeReservedHeight + verticalPadding
+        let gaugeHeight = showsGauge ? gaugeReservedHeight : 0
+        let contentHeight = speechBubbleReservedHeight + primarySpriteSize.height + gaugeHeight + sessionBadgeReservedHeight + verticalPadding
 
         var cards: [Card] = []
         var x = rowLeading
@@ -108,7 +118,8 @@ struct RowLayout: Equatable {
             cards: cards,
             contentSize: CGSize(width: contentWidth, height: contentHeight),
             primarySpriteSize: primarySpriteSize,
-            speechBubbleWidth: bubbleWidth
+            speechBubbleWidth: bubbleWidth,
+            showsGauge: showsGauge
         )
     }
 

@@ -7,7 +7,7 @@ struct PetView: View {
 
     var body: some View {
         let layout = model.layout
-        let cardHeight = layout.primarySpriteSize.height + RowLayout.sessionBadgeReservedHeight + 4
+        let cardHeight = layout.cardHeight
         let cardsCenterY = RowLayout.speechBubbleReservedHeight + cardHeight / 2
 
         ZStack(alignment: .topLeading) {
@@ -78,16 +78,25 @@ struct SessionCardView: View {
             Spacer(minLength: 0)
             sprite(state: state)
                 .frame(width: spriteSize.width, height: spriteSize.height)
+            if model.showsGauge {
+                BatteryGauge(
+                    remainingPercentage: model.gaugeValue(for: card),
+                    label: model.gaugeMetric.shortLabel,
+                    isCompact: !card.isPrimary
+                )
+                .frame(height: RowLayout.gaugeReservedHeight - 4)
+            }
             if card.isPrimary {
                 SessionBadge(
                     text: model.isExpanded ? card.label : model.collapsedLabel,
+                    state: state,
                     isDimmed: model.focusedSession == nil,
                     isHighlighted: model.isExpanded,
                     hasAttentionDot: !model.isExpanded && model.hasHiddenAttention
                 )
                 .frame(height: RowLayout.sessionBadgeReservedHeight)
             } else {
-                SessionBadge(text: card.label, isDimmed: false, isHighlighted: false, hasAttentionDot: false)
+                SessionBadge(text: card.label, state: state, isDimmed: false, isHighlighted: false, hasAttentionDot: false)
                     .frame(height: RowLayout.sessionBadgeReservedHeight)
             }
         }
@@ -169,10 +178,6 @@ struct SessionCardView: View {
                 canvas
             }
 
-            StatusBadge(state: state, isCompact: !card.isPrimary)
-                .offset(x: card.isPrimary ? 10 : 6, y: card.isPrimary ? -8 : -6)
-                .animation(.spring(duration: 0.25), value: state)
-
             if card.isPrimary {
                 FloatingHeart(trigger: model.petReactionTrigger)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -227,9 +232,10 @@ struct SpeechBubble: View {
     var body: some View {
         Text(text)
             .font(.system(size: 11.5, weight: .medium))
-            .multilineTextAlignment(.center)
+            .multilineTextAlignment(.leading) // one line: irrelevant; two lines: reads better ragged-right
             .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(
@@ -337,10 +343,11 @@ struct FloatingHeart: View {
     }
 }
 
-// MARK: - Session badge
+// MARK: - Session badge (project name + status icon)
 
 struct SessionBadge: View {
     let text: String
+    var state: PetState = .idle
     let isDimmed: Bool
     var isHighlighted = false
     var hasAttentionDot = false
@@ -354,11 +361,69 @@ struct SessionBadge: View {
                 .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(isDimmed ? .tertiary : .secondary)
                 .lineLimit(1)
+            StatusBadge(state: state, isCompact: true)
+                .animation(.spring(duration: 0.25), value: state)
         }
-        .padding(.horizontal, 7)
+        .padding(.leading, 7)
+        .padding(.trailing, state == .idle || state == .thinking ? 7 : 4)
         .padding(.vertical, 2.5)
         .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
         .overlay(Capsule().strokeBorder(isHighlighted ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.1), lineWidth: isHighlighted ? 1.2 : 1))
         .frame(maxWidth: 200)
+    }
+}
+
+// MARK: - Battery gauge (context / rate-limit remaining)
+
+struct BatteryGauge: View {
+    let remainingPercentage: Double?
+    let label: String
+    var isCompact = false
+
+    private var fraction: CGFloat {
+        CGFloat(max(0, min(100, remainingPercentage ?? 0)) / 100)
+    }
+
+    private var fillColor: Color {
+        guard let remaining = remainingPercentage else { return .gray }
+        if remaining <= 15 { return .red }
+        if remaining <= 40 { return .yellow }
+        return .green
+    }
+
+    private var bodyWidth: CGFloat { isCompact ? 18 : 24 }
+    private var bodyHeight: CGFloat { isCompact ? 8 : 10 }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            HStack(spacing: 1) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
+                        .frame(width: bodyWidth, height: bodyHeight)
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(fillColor)
+                        .frame(width: max(0, (bodyWidth - 4) * fraction), height: bodyHeight - 4)
+                        .padding(.leading, 2)
+                        .animation(.easeOut(duration: 0.4), value: fraction)
+                }
+                RoundedRectangle(cornerRadius: 0.5)
+                    .fill(Color.primary.opacity(0.45))
+                    .frame(width: 1.5, height: bodyHeight * 0.45)
+            }
+            Text(remainingPercentage.map { "\(Int($0.rounded()))%" } ?? "–")
+                .font(.system(size: isCompact ? 8 : 9, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(remainingPercentage == nil ? .tertiary : .secondary)
+            if !isCompact, !label.isEmpty {
+                Text(label)
+                    .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        // Same pill as the session badge so the gauge stays legible over any wallpaper.
+        .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1)))
     }
 }

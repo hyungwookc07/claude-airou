@@ -4,7 +4,7 @@ BINARY     := .build/release/claude-pet
 SKILL_DIR  := $(HOME)/.claude/skills/hatch-pet
 LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
 
-.PHONY: build install hooks skill uninstall run demo render-all autostart no-autostart clean
+.PHONY: build install hooks statusline skill uninstall run demo render-all autostart no-autostart clean
 
 ## Build a release binary (.build/release/claude-pet)
 build:
@@ -20,6 +20,10 @@ install: build
 hooks: install
 	$(BIN_DIR)/claude-pet install-hooks
 
+## Feed the usage gauge from the Claude Code status line (your own status line keeps running)
+statusline: install
+	$(BIN_DIR)/claude-pet install-statusline
+
 ## Install the /hatch-pet skill for Claude Code (~/.claude/skills/hatch-pet)
 skill:
 	mkdir -p $(SKILL_DIR)
@@ -29,6 +33,7 @@ skill:
 ## Remove hooks, binary, skill and launch agent (keeps ~/.claude-pet)
 uninstall:
 	-$(BIN_DIR)/claude-pet uninstall-hooks
+	-$(BIN_DIR)/claude-pet uninstall-statusline
 	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
 	rm -f $(LAUNCH_AGENT) $(BIN_DIR)/claude-pet
 	rm -rf $(SKILL_DIR)
