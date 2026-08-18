@@ -22,7 +22,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 요구사항: macOS 14+, Swift 5.9+ 툴체인 (Xcode 또는 Command Line Tools).
 
 ```bash
-git clone <this repo> && cd claude-airou
+git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
 make install      # → ~/.local/bin/claude-airou
 make hooks        # ~/.claude/settings.json 에 hook 등록 (백업 파일을 먼저 만든다)
 make statusline   # (선택) 배터리 게이지에 Claude Code 상태줄 데이터를 공급 (아래 참고)
@@ -164,3 +164,7 @@ make render-all         # 내장 펫 전부 렌더 → render/<id>/sheet.png
 ```
 
 구조: `Sources/ClaudeAirou/{Hook,State,Pets,UI,Install,CLI}`. hook 이벤트 → 상태 매핑은 `Hook/HookEventMapper.swift` 한 곳에 있다.
+
+## 라이선스
+
+MIT — [LICENSE](LICENSE) 참고.

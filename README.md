@@ -24,7 +24,7 @@ Built-in pets — Mochi (cat) · Quackers (duck) · Boo (ghost) · Jelly (slime)
 Requirements: macOS 14+, a Swift 5.9+ toolchain (Xcode or the Command Line Tools).
 
 ```bash
-git clone <this repo> && cd claude-airou
+git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
 make install      # → ~/.local/bin/claude-airou
 make hooks        # registers the hook in ~/.claude/settings.json (a backup is written first)
 make statusline   # optional: feeds the battery gauge from the Claude Code status line (see below)
@@ -165,3 +165,7 @@ make render-all         # renders every built-in pet to render/<id>/sheet.png
 ```
 
 Layout: `Sources/ClaudeAirou/{Hook,State,Pets,UI,Install,CLI}`. The event → state mapping lives in one place, `Hook/HookEventMapper.swift`; the merge rules for concurrent events are in `Hook/HookMergePolicy.swift`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
