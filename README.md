@@ -11,6 +11,10 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 ![states](docs/states.png)
 
+내장 펫 6종 — Mochi(고양이) · Quackers(오리) · Boo(유령) · Jelly(슬라임) · Bolt(로봇) · Inky(문어):
+
+![pets](docs/pets.png)
+
 ## 설치
 
 요구사항: macOS 14+, Swift 5.9+ 툴체인 (Xcode 또는 Command Line Tools).

@@ -182,13 +182,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         petItem.submenu = petMenu
         menu.addItem(petItem)
 
-        // Size picker
+        // Size picker (marks the option nearest to the current scale, so hand-edited configs still show a check)
         let sizeMenu = NSMenu()
+        let nearestScale = AppConfig.availablePixelScales
+            .min { abs(CGFloat($0.scale) - viewModel.pixelScale) < abs(CGFloat($1.scale) - viewModel.pixelScale) }?
+            .scale
         for option in AppConfig.availablePixelScales {
             let item = NSMenuItem(title: option.label, action: #selector(selectSizeMenuItem(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = option.scale
-            item.state = abs(CGFloat(option.scale) - viewModel.pixelScale) < 0.01 ? .on : .off
+            item.state = option.scale == nearestScale ? .on : .off
             sizeMenu.addItem(item)
         }
         let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
