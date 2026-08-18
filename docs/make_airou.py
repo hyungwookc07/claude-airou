@@ -1,28 +1,33 @@
-"""Generate the Airou pet — a Monster-Hunter-Felyne-inspired chibi cat — for claude-airou.
+"""Generate the Airou pet — a Monster-Hunter-Felyne-inspired hunting companion — for claude-airou.
 
-Felyne cues (checked against Capcom's "Airou from the Monster Hunter" art, the deformed plush and
-the MegaHouse figure): cream fur with brown "points" — an inverted-triangle mask down the middle
-of the face, brown ear backs with pink insides, brown paw/feet tips and tail tuft, a paw-print
-mark on the belly; an oversized round head with puffy cheeks; big round eyes sitting on the mask
-edges; a small nose over an "ω" mouth; prominent whiskers; a long thin tail ending in a tuft.
+Checked against reference images (Capcom's "Airou from the Monster Hunter" art, the Fuwatama /
+deformed plushes, the MegaHouse figure, the wiki render): cream fur with brown "points" — an
+inverted-triangle mask down the middle of the face, brown ear backs with pink insides, brown
+paw / feet tips and tail tuft — big round blue eyes sitting on the mask edges, a small nose over
+an "ω" mouth, whiskers, a chubby body. Palico gear: a leather vest with belt and pouch, and the
+signature paw hammer planted on the ground beside it.
 
 Silhouette pieces are painted into a mask, the outline is derived automatically (mask pixels
-touching transparency), then features are overlaid. States only change eyes / mouth / props /
-one paw, so the body stays put.
+touching transparency), then features and gear are overlaid. States only change eyes / mouth /
+props / one paw, so the body stays put.
 Run:  python3 docs/make_airou.py && claude-airou validate Sources/ClaudeAirou/Resources/pets/airou-felyne.json
 """
 import json
 import pathlib
 
-W = H = 24
+W = H = 28
 
 PALETTE = {
     "k": "#4A3020",  # outline (dark brown)
     "c": "#F5ECD8",  # cream fur
-    "t": "#A6754A",  # brown "points": face mask, ear backs, paw/feet tips, tail tuft, paw print
-    "p": "#EFA6BC",  # pink ear insides / nose
-    "e": "#1F1611",  # eyes
+    "t": "#A6754A",  # brown points: face mask, ear backs, paw/feet tips, tail tuft
+    "p": "#EFA6BC",  # pink ear insides / nose / hammer pads
+    "e": "#1F1611",  # eye rims and pupils
+    "i": "#3FA7D6",  # blue iris
     "w": "#FFFFFF",  # eye highlight
+    "v": "#C4854A",  # leather vest
+    "l": "#E9C58C",  # belt / pouch / vest trim
+    "o": "#8B5E34",  # hammer handle
     "y": "#F5C518",  # sparkle / question mark
     "b": "#4C9AFF",  # thought dots / sweat
     "r": "#E5484D",  # alert "!"
@@ -83,203 +88,267 @@ def paint_inside(g, mask, ch, only=("c",)):
             if mask[y][x] and g[y][x] in only:
                 g[y][x] = ch
 
-# ---------------------------------------------------------------- body
+def line(g, x0, y0, x1, y1, ch):
+    """Bresenham line."""
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err = dx + dy
+    while True:
+        put(g, x0, y0, ch)
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy: err += dy; x0 += sx
+        if e2 <= dx: err += dx; y0 += sy
 
-LEFT_EAR = ((4.0, -0.3), (0.6, 7.2), (9.6, 4.2))
-RIGHT_EAR = ((19.0, -0.3), (22.4, 7.2), (13.4, 4.2))
+# ---------------------------------------------------------------- body geometry (28x28)
+
+HEAD = (13.5, 11.2, 10.4, 8.0)                     # cx, cy, rx, ry  -> x 3..24, y 3..19
+LEFT_EAR = ((5.0, 0.0), (0.8, 8.4), (11.4, 5.4))
+RIGHT_EAR = ((22.0, 0.0), (26.2, 8.4), (15.6, 5.4))
+LEFT_CHEEK = (5.4, 14.6, 2.9, 2.6)
+RIGHT_CHEEK = (21.6, 14.6, 2.9, 2.6)
+TORSO = (8, 19, 19, 24)
+LEFT_PAW = (6, 20, 7, 23)
+RIGHT_PAW = (20, 20, 21, 23)
+LEFT_FOOT = (8, 25, 11, 27)
+RIGHT_FOOT = (16, 25, 19, 27)
+EYE_LEFT_X, EYE_RIGHT_X, EYE_Y = 6, 16, 9          # 6x6 eyes
 
 def body_mask():
     m = blank()
-    ellipse(m, 11.5, 9.6, 9.1, 7.0)         # big round head (x 3..20, y 3..16)
-    ellipse(m, 4.6, 12.2, 2.4, 2.2)         # left puffy cheek
-    ellipse(m, 18.4, 12.2, 2.4, 2.2)        # right puffy cheek
-    triangle(m, *LEFT_EAR)                  # big pointed ears
+    ellipse(m, *HEAD)
+    ellipse(m, *LEFT_CHEEK)
+    ellipse(m, *RIGHT_CHEEK)
+    triangle(m, *LEFT_EAR)
     triangle(m, *RIGHT_EAR)
-    rect(m, 7, 16, 16, 20)                  # chubby torso
-    rect(m, 5, 17, 6, 19)                   # left paw
-    rect(m, 17, 17, 18, 19)                 # right paw
-    rect(m, 7, 21, 9, 23)                   # left foot
-    rect(m, 14, 21, 16, 23)                 # right foot
+    rect(m, *TORSO)
+    rect(m, *LEFT_PAW)
+    rect(m, *RIGHT_PAW)
+    rect(m, *LEFT_FOOT)
+    rect(m, *RIGHT_FOOT)
     return m
 
-def base(tail=0, raised_paw=None):
+def eye(g, x0, y0, look_dx=0, look_dy=0):
+    """6x6 round eye: dark rim, blue iris, 2x2 pupil, highlights. Pupil offset by (look_dx, look_dy)."""
+    for x in range(x0, x0 + 6):
+        for y in range(y0, y0 + 6):
+            put(g, x, y, "i")
+    for (x, y) in ((x0, y0), (x0 + 5, y0), (x0, y0 + 5), (x0 + 5, y0 + 5)):
+        put(g, x, y, "c" if g[y][x] not in ("t",) else "t")   # rounded corners keep the fur behind
+    for x in range(x0 + 1, x0 + 5):
+        put(g, x, y0, "e"); put(g, x, y0 + 5, "e")
+    for y in range(y0 + 1, y0 + 5):
+        put(g, x0, y, "e"); put(g, x0 + 5, y, "e")
+    px, py = x0 + 2 + look_dx, y0 + 2 + look_dy
+    for x in (px, px + 1):
+        for y in (py, py + 1):
+            put(g, x, y, "e")
+    put(g, x0 + 1, y0 + 1, "w"); put(g, x0 + 2, y0 + 1, "w"); put(g, x0 + 4, y0 + 4, "w")
+
+def base(tail=0, raised_paw=None, hammer=True):
     g = render(body_mask())
 
     # ears: brown backs, pink insides
-    ear_fill = blank()
-    triangle(ear_fill, *LEFT_EAR); triangle(ear_fill, *RIGHT_EAR)
-    paint_inside(g, ear_fill, "t")
+    ears = blank(); triangle(ears, *LEFT_EAR); triangle(ears, *RIGHT_EAR)
+    paint_inside(g, ears, "t")
     inner = blank()
-    triangle(inner, (4.2, 2.2), (2.6, 5.8), (7.2, 4.4))
-    triangle(inner, (18.8, 2.2), (20.4, 5.8), (15.8, 4.4))
+    triangle(inner, (5.2, 2.6), (3.0, 7.0), (8.6, 5.6))
+    triangle(inner, (21.8, 2.6), (24.0, 7.0), (18.4, 5.6))
     paint_inside(g, inner, "p", only=("t",))
 
-    # brown face mask: inverted triangle from between the ears down to the muzzle
-    mask = blank()
-    triangle(mask, (5.5, 3.0), (18.5, 3.0), (12.0, 15.2))
+    # brown face mask: inverted triangle from between the ears to the muzzle
+    mask = blank(); triangle(mask, (6.5, 3.4), (20.5, 3.4), (13.5, 17.6))
     paint_inside(g, mask, "t")
 
-    # big round eyes (5x5, rounded corners) sitting on the mask edges, two highlights
-    for x0 in (5, 14):
-        for x in range(x0, x0 + 5):
-            for y in range(8, 13):
-                put(g, x, y, "e")
-        for (x, y) in ((x0, 8), (x0 + 4, 8), (x0, 12), (x0 + 4, 12)):
-            put(g, x, y, "c" if g[y][x] != "t" else "t")
-        put(g, x0 + 1, 9, "w"); put(g, x0 + 2, 9, "w"); put(g, x0 + 3, 11, "w")
+    # eyes on the mask edges
+    eye(g, EYE_LEFT_X, EYE_Y); eye(g, EYE_RIGHT_X, EYE_Y)
 
-    # small pink nose at the mask tip, "ω" mouth on the cream muzzle below
-    put(g, 11, 13, "p"); put(g, 12, 13, "p")
-    for (x, y) in ((9, 15), (11, 15), (13, 15), (10, 16), (12, 16)):
+    # nose (pink) at the mask tip, "ω" mouth on the cream muzzle
+    put(g, 13, 15, "p"); put(g, 14, 15, "p"); put(g, 13, 16, "p"); put(g, 14, 16, "p")
+    for (x, y) in ((11, 17), (13, 17), (15, 17), (12, 18), (14, 18)):
         put(g, x, y, "k")
 
     # whiskers, two per side, from the cheeks
-    for (x, y) in ((1, 10), (2, 10), (1, 12), (2, 12), (21, 10), (22, 10), (21, 12), (22, 12)):
+    for (x, y) in ((1, 12), (2, 12), (1, 14), (2, 14), (25, 12), (26, 12), (25, 14), (26, 14)):
         put(g, x, y, "k")
 
+    # leather vest with belt and a hip pouch (Palico gear)
+    for x in range(9, 19):
+        for y in range(19, 24):
+            if g[y][x] == "c":
+                put(g, x, y, "v")
+    for x in (12, 13, 14, 15):
+        put(g, x, 19, "c")                    # neck opening
+    put(g, 12, 20, "c"); put(g, 15, 20, "c")
+    for x in range(9, 19):
+        put(g, x, 23, "l")                    # belt
+    put(g, 9, 21, "l"); put(g, 10, 21, "l"); put(g, 9, 22, "l"); put(g, 10, 22, "l")   # pouch
+    put(g, 9, 21, "k")
+
     # brown paw / feet tips
-    for (x, y) in ((5, 19), (6, 19), (17, 19), (18, 19)):
+    for (x, y) in ((6, 23), (7, 23), (20, 23), (21, 23)):
         put(g, x, y, "t")
-    for x in (7, 8, 9, 14, 15, 16):
-        put(g, x, 22, "t")
+    for x in (8, 9, 10, 11, 16, 17, 18, 19):
+        put(g, x, 26, "t")
 
-    # paw-print mark on the belly (three toes over a pad)
-    for (x, y) in ((10, 17), (12, 17), (14, 17), (11, 18), (12, 18), (13, 18), (11, 19), (12, 19), (13, 19)):
-        put(g, x, y, "t")
-
-    # long thin tail curling up on the right, ending in a fluffy tan tuft; two poses
+    # long thin tail curling up on the right, fluffy brown tuft; two poses
     if tail == 0:
-        for (x, y) in ((17, 21), (18, 22), (19, 21), (20, 20), (21, 19), (21, 18)):
+        for (x, y) in ((20, 25), (21, 26), (22, 25), (23, 24), (24, 23), (24, 22), (24, 21)):
             put(g, x, y, "k")
         for dx in range(3):
             for dy in range(3):
-                put(g, 19 + dx, 15 + dy, "k")
-        put(g, 20, 16, "t")
+                put(g, 23 + dx, 18 + dy, "t")
+        for (x, y) in ((23, 18), (25, 18), (23, 20), (25, 20)):
+            put(g, x, y, "k")
     else:
-        for (x, y) in ((17, 21), (18, 22), (19, 21), (20, 20), (21, 19), (22, 18)):
+        for (x, y) in ((20, 25), (21, 26), (22, 25), (23, 24), (24, 23), (25, 22), (25, 21)):
             put(g, x, y, "k")
         for dx in range(3):
             for dy in range(3):
-                put(g, 20 + dx, 15 + dy, "k")
-        put(g, 21, 16, "t")
+                put(g, 24 + dx, 18 + dy, "t")
+        for (x, y) in ((24, 18), (26, 18), (24, 20), (26, 20)):
+            put(g, x, y, "k")
 
-    # raised paw (hello): 4x4 fist beside the head with a 2-wide arm down to the shoulder
+    # signature paw hammer planted on the ground beside the left foot, handle angled up into the paw
+    if hammer:
+        # head: 6x6 paw (pad + three toes) at the bottom-left, brown with pink pads, outlined
+        for x in range(0, 6):
+            for y in range(23, 28):
+                put(g, x, y, "t")
+        for (x, y) in ((0, 22), (1, 22), (2, 22), (3, 22), (4, 22), (5, 22)):
+            put(g, x, y, "t")
+        for (x, y) in ((0, 21), (2, 21), (4, 21)):
+            put(g, x, y, "t")                       # toe tips
+        for (x, y) in ((1, 24), (2, 24), (3, 24), (4, 24), (1, 25), (2, 25), (3, 25), (4, 25), (2, 26), (3, 26)):
+            put(g, x, y, "p")                       # big pad
+        for (x, y) in ((0, 23), (2, 23), (4, 23)):
+            put(g, x, y, "p")                       # toe pads
+        for (x, y) in ((0, 20), (2, 20), (4, 20), (1, 21), (3, 21), (5, 21), (6, 22), (6, 23), (6, 24), (6, 25), (6, 26), (6, 27), (0, 27), (5, 27)):
+            if g[y][x] == ".":
+                put(g, x, y, "k")                   # outline where free
+        # handle from the head up into the left paw
+        put(g, 3, 20, "o"); put(g, 4, 20, "o"); put(g, 5, 19, "o"); put(g, 5, 20, "o")
+
+    # raised right paw (hello): 5x5 fist beside the head with an arm down to the shoulder
     if raised_paw is not None:
         px, py = raised_paw
-        for dx in range(4):
-            for dy in range(4):
+        for dx in range(5):
+            for dy in range(5):
                 put(g, px + dx, py + dy, "k")
-        for dx in (1, 2):
-            for dy in (1, 2):
+        for dx in (1, 2, 3):
+            for dy in (1, 2, 3):
                 put(g, px + dx, py + dy, "c")
-        put(g, px + 1, py + 2, "t"); put(g, px + 2, py + 2, "t")   # tan paw tip
-        for y in range(py + 4, 17):
-            put(g, px, y, "c"); put(g, px + 1, y, "c"); put(g, px + 2, y, "k")
-        for (x, y) in ((17, 17), (18, 17), (17, 18), (18, 18), (17, 19), (18, 19)):
-            put(g, x, y, "c")   # right paw folded away while raised
-        put(g, 17, 20, "k"); put(g, 18, 20, "k")
+        for dx in (1, 2, 3):
+            put(g, px + dx, py + 3, "t")
+        for y in range(py + 5, 20):
+            put(g, px, y, "k"); put(g, px + 1, y, "c"); put(g, px + 2, y, "c"); put(g, px + 3, y, "k")
+        for (x, y) in ((20, 20), (21, 20), (20, 21), (21, 21), (20, 22), (21, 22), (20, 23), (21, 23)):
+            put(g, x, y, "c")
+        put(g, 20, 24, "k"); put(g, 21, 24, "k")
     return g
 
-EYE_ROWS = (7, 8, 9, 10, 11, 12)
-
 def clear_eyes(g):
-    for x0 in (5, 14):
-        for x in range(x0, x0 + 5):
-            for y in EYE_ROWS:
-                if g[y][x] in ("e", "w"):
-                    g[y][x] = "c"
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        for x in range(x0, x0 + 6):
+            for y in range(EYE_Y - 1, EYE_Y + 7):
+                if g[y][x] in ("e", "i", "w"):
+                    # restore fur/mask behind: mask triangle decides
+                    g[y][x] = "t" if in_mask(x, y) else "c"
 
-def big_eyes(g, dx=0, dy=0, tall=5):
-    for x0 in (5 + dx, 14 + dx):
-        y0 = 8 + dy
-        for x in range(x0, x0 + 5):
-            for y in range(y0, y0 + tall):
-                put(g, x, y, "e")
-        for (x, y) in ((x0, y0), (x0 + 4, y0), (x0, y0 + tall - 1), (x0 + 4, y0 + tall - 1)):
-            put(g, x, y, "c")
-        put(g, x0 + 1, y0 + 1, "w"); put(g, x0 + 2, y0 + 1, "w"); put(g, x0 + 3, y0 + tall - 2, "w")
+_MASK = blank(); triangle(_MASK, (6.5, 3.4), (20.5, 3.4), (13.5, 17.6))
+def in_mask(x, y):
+    return _MASK[y][x]
 
 def clear_mouth(g):
-    for (x, y) in ((9, 15), (11, 15), (13, 15), (10, 16), (12, 16)):
-        put(g, x, y, "c")
+    for (x, y) in ((11, 17), (13, 17), (15, 17), (12, 18), (14, 18)):
+        put(g, x, y, "t" if in_mask(x, y) else "c")
 
 def rows(g):
     return ["".join(r) for r in g]
 
 frames = {}
 
-# idle: tail sways, one blink
+# idle: tail sways, one blink (eyes closed = curved dark lines)
 i0 = base(tail=0); i1 = base(tail=1); i2 = base(tail=0)
 blink = base(tail=0); clear_eyes(blink)
-for x0 in (5, 14):
-    put(blink, x0, 9, "e"); put(blink, x0 + 1, 10, "e"); put(blink, x0 + 2, 10, "e"); put(blink, x0 + 3, 10, "e"); put(blink, x0 + 4, 9, "e")
+for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+    put(blink, x0, EYE_Y + 2, "e"); put(blink, x0 + 5, EYE_Y + 2, "e")
+    for x in range(x0 + 1, x0 + 5):
+        put(blink, x, EYE_Y + 3, "e")
 frames["idle"] = [rows(i0), rows(i1), rows(i2), rows(blink)]
 
-# thinking: eyes drift up-right + blue dots
+# thinking: pupils drift up-right + blue dots
 def thinking(dots):
     g = base(tail=0); clear_eyes(g)
-    big_eyes(g, dx=1, dy=-1)
+    eye(g, EYE_LEFT_X, EYE_Y, look_dx=1, look_dy=-1); eye(g, EYE_RIGHT_X, EYE_Y, look_dx=1, look_dy=-1)
     for (x, y) in dots:
         put(g, x, y, "b")
     return g
-frames["thinking"] = [rows(thinking([(23, 3)])), rows(thinking([(22, 4), (23, 2), (23, 0)]))]
+frames["thinking"] = [rows(thinking([(27, 5)])), rows(thinking([(26, 6), (27, 4), (27, 2)]))]
 
-# working: focused — lower half of the eyes + slanted brows, left paw nudges up
+# working: focused — upper lids drawn down over the eyes + slanted brows, left paw nudges up
 def working(paw_up):
-    g = base(tail=0); clear_eyes(g)
-    for x0 in (5, 14):
-        for x in range(x0, x0 + 5):
-            for y in (10, 11, 12):
-                put(g, x, y, "e")
-        put(g, x0, 12, "c"); put(g, x0 + 4, 12, "c")
-        put(g, x0 + 1, 10, "w"); put(g, x0 + 2, 10, "w")
-    put(g, 5, 8, "k"); put(g, 6, 9, "k"); put(g, 18, 8, "k"); put(g, 17, 9, "k")
+    g = base(tail=0)
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        for x in range(x0, x0 + 6):
+            for y in (EYE_Y, EYE_Y + 1):
+                put(g, x, y, "t" if in_mask(x, y) else "c")
+        for x in range(x0 + 1, x0 + 5):
+            put(g, x, EYE_Y + 2, "e")   # lid line
+        put(g, x0, EYE_Y + 3, "e"); put(g, x0 + 5, EYE_Y + 3, "e")
+    put(g, 6, 7, "k"); put(g, 7, 8, "k"); put(g, 21, 7, "k"); put(g, 20, 8, "k")
     if paw_up:
-        for y in (17, 18, 19):
-            put(g, 5, y, "c"); put(g, 6, y, "c")
-        put(g, 5, 16, "k"); put(g, 6, 16, "k"); put(g, 5, 17, "k"); put(g, 5, 18, "t"); put(g, 6, 18, "t"); put(g, 5, 19, "k"); put(g, 6, 19, "k")
+        for y in (20, 21, 22, 23):
+            put(g, 20, y, "c"); put(g, 21, y, "c")
+        put(g, 20, 19, "k"); put(g, 21, 19, "k"); put(g, 20, 20, "k"); put(g, 21, 20, "c"); put(g, 20, 21, "t"); put(g, 21, 21, "t"); put(g, 20, 22, "k"); put(g, 21, 22, "k")
     return g
 frames["working"] = [rows(working(False)), rows(working(True))]
 
-# waiting_approval: even bigger eyes, small "o" mouth, red "!" floating clear of the right ear
+# waiting_approval: big pupils, small "o" mouth, red "!" floating clear of the right ear
 def waiting(shift):
     g = base(tail=0); clear_eyes(g); clear_mouth(g)
-    big_eyes(g, dy=-1, tall=6)
-    put(g, 11, 15, "e"); put(g, 12, 15, "e"); put(g, 11, 16, "e"); put(g, 12, 16, "e")
-    for y in range(0 + shift, 3 + shift):
-        put(g, 22, y, "r"); put(g, 23, y, "r")
-    put(g, 22, 4 + shift, "r"); put(g, 23, 4 + shift, "r")
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        eye(g, x0, EYE_Y)
+        for x in range(x0 + 2, x0 + 5):
+            for y in range(EYE_Y + 2, EYE_Y + 5):
+                put(g, x, y, "e")           # dilated pupil
+        put(g, x0 + 1, EYE_Y + 1, "w"); put(g, x0 + 2, EYE_Y + 1, "w")
+    put(g, 13, 17, "e"); put(g, 14, 17, "e"); put(g, 13, 18, "e"); put(g, 14, 18, "e")
+    for y in range(0 + shift, 4 + shift):
+        put(g, 26, y, "r"); put(g, 27, y, "r")
+    put(g, 26, 5 + shift, "r"); put(g, 27, 5 + shift, "r")
     return g
 frames["waiting_approval"] = [rows(waiting(0)), rows(waiting(1))]
 
 # needs_input: half-lidded + yellow "?"
 def needs_input(dy):
-    g = base(tail=0); clear_eyes(g)
-    for x0 in (5, 14):
-        for x in range(x0, x0 + 5):
-            for y in (10, 11, 12):
-                put(g, x, y, "e")
-        put(g, x0, 12, "c"); put(g, x0 + 4, 12, "c")
-        put(g, x0 + 1, 10, "w"); put(g, x0 + 2, 10, "w")
-        for x in range(x0, x0 + 5):
-            put(g, x, 9, "k")  # lid
-    q = ["yyy", "..y", ".yy", "...", ".y."]
-    for r, line in enumerate(q):
-        for c, ch in enumerate(line):
+    g = base(tail=0)
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        for x in range(x0, x0 + 6):
+            for y in (EYE_Y, EYE_Y + 1):
+                put(g, x, y, "t" if in_mask(x, y) else "c")
+        for x in range(x0 + 1, x0 + 5):
+            put(g, x, EYE_Y + 2, "e")
+    q = ["yyyy", "...y", "..yy", "....", "..y."]
+    for r, ln in enumerate(q):
+        for c, ch in enumerate(ln):
             if ch == "y":
-                put(g, 21 + c, r + dy, "y")
+                put(g, 24 + c, r + dy, "y")
     return g
 frames["needs_input"] = [rows(needs_input(0)), rows(needs_input(1))]
 
-# done: ^^ eyes + big open smile + sparkles
+# done: ^^ eyes + wide open smile + sparkles
 def done(alt):
     g = base(tail=1 if alt else 0); clear_eyes(g); clear_mouth(g)
-    for x0 in (5, 14):
-        put(g, x0 + 2, 9, "e"); put(g, x0 + 1, 10, "e"); put(g, x0 + 3, 10, "e"); put(g, x0, 11, "e"); put(g, x0 + 4, 11, "e")
-    put(g, 9, 15, "k"); put(g, 14, 15, "k")
-    for x in range(10, 14):
-        put(g, x, 16, "k")
-    for (x, y) in ([(1, 5), (22, 9), (2, 15)] if not alt else [(0, 8), (23, 6), (1, 12)]):
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        put(g, x0 + 2, EYE_Y + 2, "e"); put(g, x0 + 3, EYE_Y + 2, "e")
+        put(g, x0 + 1, EYE_Y + 3, "e"); put(g, x0 + 4, EYE_Y + 3, "e")
+        put(g, x0, EYE_Y + 4, "e"); put(g, x0 + 5, EYE_Y + 4, "e")
+    put(g, 11, 17, "k"); put(g, 16, 17, "k")
+    for x in range(12, 16):
+        put(g, x, 18, "k")
+    for (x, y) in ([(1, 10), (26, 9), (2, 18)] if not alt else [(0, 13), (27, 7), (1, 16)]):
         put(g, x, y, "y")
     return g
 frames["done"] = [rows(done(False)), rows(done(True))]
@@ -287,24 +356,24 @@ frames["done"] = [rows(done(False)), rows(done(True))]
 # error: x x eyes + frown + sweat drop
 def error(drop_dy):
     g = base(tail=0); clear_eyes(g); clear_mouth(g)
-    for x0 in (5, 14):
-        for (dx, dy) in ((0, 0), (4, 0), (1, 1), (3, 1), (2, 2), (1, 3), (3, 3), (0, 4), (4, 4)):
-            put(g, x0 + dx, 8 + dy, "e")
-    put(g, 9, 16, "k"); put(g, 14, 16, "k")
-    for x in range(10, 14):
-        put(g, x, 15, "k")
-    put(g, 22, 8 + drop_dy, "b"); put(g, 22, 9 + drop_dy, "b")
+    for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
+        for d in range(6):
+            put(g, x0 + d, EYE_Y + d, "e"); put(g, x0 + 5 - d, EYE_Y + d, "e")
+    put(g, 11, 18, "k"); put(g, 16, 18, "k")
+    for x in range(12, 16):
+        put(g, x, 17, "k")
+    put(g, 26, 10 + drop_dy, "b"); put(g, 26, 11 + drop_dy, "b")
     return g
 frames["error"] = [rows(error(0)), rows(error(2))]
 
-# hello: raised right paw waving beside the head
-frames["hello"] = [rows(base(tail=0, raised_paw=(20, 9))), rows(base(tail=1, raised_paw=(20, 7)))]
+# hello: right paw raised and waving (the hammer stays on the left shoulder)
+frames["hello"] = [rows(base(tail=0, raised_paw=(23, 11))), rows(base(tail=1, raised_paw=(23, 9)))]
 
 pet = {
     "id": "airou-felyne",
     "name": "Airou",
     "species": "felyne",
-    "description": "A Felyne-style hunting companion: cream fur, tan-tipped ears and paws, big round eyes. Carves your builds for materials, nya.",
+    "description": "A Felyne hunting companion: cream fur with brown points and blue eyes, leather vest, paw hammer on the shoulder. Carves your builds for materials, nya.",
     "author": "claude-airou",
     "fps": 3,
     "palette": PALETTE,
