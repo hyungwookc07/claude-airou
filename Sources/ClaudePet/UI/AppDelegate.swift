@@ -50,8 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .sink { [weak self] newLayout in
                 guard let self else { return }
                 // Keep the primary pet where it is on screen while the row grows or shrinks around it.
-                let anchorScreenX = self.panel.frame.minX + lastPrimaryCenterX
+                let previousMinX = self.panel.frame.minX
+                let anchorScreenX = previousMinX + lastPrimaryCenterX
                 self.panel.resize(to: newLayout.contentSize, keepingContentX: newLayout.primaryCenterX, atScreenX: anchorScreenX)
+                self.viewModel.panelShiftX = self.panel.frame.minX - previousMinX
                 lastPrimaryCenterX = newLayout.primaryCenterX
             }
             .store(in: &cancellables)

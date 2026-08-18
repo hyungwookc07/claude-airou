@@ -18,6 +18,7 @@ struct PetView: View {
             }
 
             speechBubbleArea
+                .padding(.bottom, RowLayout.speechBubbleBottomInset)
                 .frame(width: bubbleWidth(in: layout), height: RowLayout.speechBubbleReservedHeight, alignment: .bottom)
                 .position(x: bubbleCenterX(in: layout), y: RowLayout.speechBubbleReservedHeight / 2)
         }
@@ -27,7 +28,7 @@ struct PetView: View {
     }
 
     private func bubbleWidth(in layout: RowLayout) -> CGFloat {
-        min(RowLayout.speechBubbleMaxWidth, layout.contentSize.width - 8)
+        min(max(layout.speechBubbleWidth, 40), layout.contentSize.width - 8)
     }
 
     /// Centre the bubble over the primary pet (RowLayout reserves the room), clamped as a safety net.
@@ -57,7 +58,14 @@ struct SessionCardView: View {
     let card: RowLayout.Card
     let cardHeight: CGFloat
 
-    @State private var hasAppeared = false
+    // Animated "from" state: cards start where they were on screen (or inside the primary pet)
+    // and settle into their new slot. Screen-space, so the panel's own move never shows.
+    @State private var animatedOffsetX: CGFloat = 0
+    @State private var animatedScale: CGFloat = 1
+    @State private var animatedOpacity: CGFloat = 1
+
+    private static let settleAnimation: Animation = .spring(duration: 0.34, bounce: 0.18)
+    private static let foldAnimation: Animation = .easeIn(duration: PetViewModel.collapseAnimationSeconds)
 
     private var spriteSize: CGSize {
         let grid = model.pet.gridSize
@@ -84,10 +92,60 @@ struct SessionCardView: View {
             }
         }
         .frame(height: cardHeight, alignment: .bottom)
-        .opacity(card.isPrimary ? 1 : (hasAppeared ? 0.92 : 0))
-        .onAppear {
-            if card.isPrimary { hasAppeared = true; return }
-            withAnimation(.easeOut(duration: 0.18)) { hasAppeared = true }
+        .scaleEffect(animatedScale, anchor: .bottom)
+        .offset(x: animatedOffsetX)
+        .opacity(Double(animatedOpacity) * (card.isPrimary ? 1 : 0.92))
+        .onAppear { animateFromPreviousLayout() }
+        .onChange(of: model.layoutGeneration) { _, _ in animateFromPreviousLayout() }
+        .onChange(of: model.isCollapsing) { _, isCollapsing in
+            guard isCollapsing, !card.isPrimary else { return }
+            // Fold back into the primary pet; the row collapses right after.
+            withAnimation(Self.foldAnimation) {
+                animatedOffsetX = model.layout.primaryCenterX - card.centerX
+                animatedScale = 0.45
+                animatedOpacity = 0
+            }
+        }
+    }
+
+    /// FLIP: place the card at its previous on-screen position (or inside the previous primary if
+    /// it is new), then animate to its slot. All in screen space: `panelShiftX` is how far the
+    /// panel itself just moved.
+    private func animateFromPreviousLayout() {
+        guard let previous = model.previousLayout else { return }
+        let shift = model.panelShiftX
+        let newScreenCenterX = card.centerX + shift
+        let startOffsetX: CGFloat
+        let startScale: CGFloat
+        let startOpacity: CGFloat
+        if let old = previous.cards.first(where: { $0.id == card.id }) {
+            startOffsetX = old.centerX - newScreenCenterX
+            startScale = old.pixelScale / card.pixelScale
+            startOpacity = 1
+        } else {
+            startOffsetX = previous.primaryCenterX - newScreenCenterX
+            startScale = 0.45
+            startOpacity = 0
+        }
+        // Nothing to do when the card is exactly where it was (typically the primary).
+        if abs(startOffsetX) < 0.5, abs(startScale - 1) < 0.01, startOpacity == 1 {
+            animatedOffsetX = 0; animatedScale = 1; animatedOpacity = 1
+            return
+        }
+        // Render the "from" state this frame, then animate to the slot on the next turn of the loop
+        // (a synchronous withAnimation right after the assignment would be coalesced away).
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            animatedOffsetX = startOffsetX
+            animatedScale = startScale
+            animatedOpacity = startOpacity
+        }
+        DispatchQueue.main.async {
+            withAnimation(Self.settleAnimation) {
+                animatedOffsetX = 0
+                animatedScale = 1
+                animatedOpacity = 1
+            }
         }
     }
 
@@ -189,6 +247,7 @@ struct SpeechBubble: View {
                     .frame(width: 12, height: 6)
                     .offset(y: 5.5)
             }
+            .frame(maxWidth: RowLayout.speechBubbleMaxWidth)
     }
 }
 

@@ -22,7 +22,9 @@ final class PetViewModel: ObservableObject {
     @Published private(set) var frameIndex: Int = 0
     @Published private(set) var petReactionMessage: String?
     @Published private(set) var pixelScale: CGFloat
-    @Published var isSpeechBubbleHidden: Bool
+    @Published var isSpeechBubbleHidden: Bool {
+        didSet { relayoutIfNeeded() }
+    }
     @Published private(set) var doneBounceTrigger: Int = 0
     @Published private(set) var errorShakeTrigger: Int = 0
     @Published private(set) var petReactionTrigger: Int = 0
@@ -37,6 +39,16 @@ final class PetViewModel: ObservableObject {
 
     /// Current geometry; the panel resizes from this.
     @Published private(set) var layout: RowLayout
+    /// Bumped on every layout change so cards can run their entrance / move animation.
+    @Published private(set) var layoutGeneration = 0
+    /// The layout before the last change (cards animate from their old screen position).
+    private(set) var previousLayout: RowLayout?
+    /// How far the panel moved (screen x, points) to keep the primary pet still during the last
+    /// layout change; set by the app delegate right after resizing, read by the view.
+    var panelShiftX: CGFloat = 0
+    /// True while side cards fold back into the primary before the row actually collapses.
+    @Published private(set) var isCollapsing = false
+    static let collapseAnimationSeconds: TimeInterval = 0.22
 
     /// Fires whenever `layout` changed in a way that needs the panel resized (size or primary position).
     let layoutDidChange = PassthroughSubject<RowLayout, Never>()
@@ -65,6 +77,22 @@ final class PetViewModel: ObservableObject {
         self.layout = RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: ["no session"], sessionIds: [nil], primaryIndex: 0)
     }
 
+    // MARK: - Speech bubble measurement
+
+    static let speechBubbleFont = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+    static let speechBubbleHorizontalPadding: CGFloat = 9
+
+    /// Width the bubble will take for `text` (single line up to the max, then it wraps to two lines).
+    static func measuredSpeechBubbleWidth(for text: String) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let textWidth = (text as NSString).size(withAttributes: [.font: speechBubbleFont]).width
+        return min(RowLayout.speechBubbleMaxWidth, (textWidth + speechBubbleHorizontalPadding * 2 + 2).rounded(.up))
+    }
+
+    var currentSpeechBubbleWidth: CGFloat {
+        isSpeechBubbleVisible ? Self.measuredSpeechBubbleWidth(for: speechBubbleText) : 0
+    }
+
     // MARK: - Derived
 
     var isExpanded: Bool { (isFannedOut || isAlwaysFannedOut) && sessions.count >= 2 }
@@ -74,7 +102,14 @@ final class PetViewModel: ObservableObject {
     /// Geometry of the collapsed (single-card) row for the current pet and scale — used to
     /// store a stable window position regardless of the current fan-out state.
     var collapsedLayout: RowLayout {
-        RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: [collapsedLabel], sessionIds: [focusedSession?.sessionId], primaryIndex: 0)
+        RowLayout.make(
+            gridSize: pet.gridSize,
+            pixelScale: pixelScale,
+            labels: [collapsedLabel],
+            sessionIds: [focusedSession?.sessionId],
+            primaryIndex: 0,
+            speechBubbleWidth: currentSpeechBubbleWidth
+        )
     }
 
     func frame(for state: PetState) -> [String] {
@@ -156,6 +191,7 @@ final class PetViewModel: ObservableObject {
         }
         if loaded.count < 2, isFannedOut {
             isFannedOut = false // nothing left to fan out
+            isCollapsing = false
         }
 
         // Pinned session wins, then attention-needing, then busy, then the most recently updated.
@@ -222,17 +258,21 @@ final class PetViewModel: ObservableObject {
                 pixelScale: pixelScale,
                 labels: row.map(\.projectName),
                 sessionIds: row.map { Optional($0.sessionId) },
-                primaryIndex: primaryIndex
+                primaryIndex: primaryIndex,
+                speechBubbleWidth: currentSpeechBubbleWidth
             )
         } else {
             newLayout = collapsedLayout
         }
         guard newLayout != layout else { return }
         let needsPanelUpdate = newLayout.contentSize != layout.contentSize || newLayout.primaryCenterX != layout.primaryCenterX
+        previousLayout = layout
+        panelShiftX = 0
         layout = newLayout
         if needsPanelUpdate {
-            layoutDidChange.send(newLayout)
+            layoutDidChange.send(newLayout) // synchronous: the delegate resizes the panel and sets panelShiftX
         }
+        layoutGeneration &+= 1
     }
 
     // MARK: - User interaction
@@ -246,6 +286,10 @@ final class PetViewModel: ObservableObject {
         guard sessions.count >= 2 else {
             log("pet")
             petWasClicked()
+            return
+        }
+        if isCollapsing {
+            log("ignored (collapsing)")
             return
         }
         if !isExpanded {
@@ -273,10 +317,16 @@ final class PetViewModel: ObservableObject {
         }
     }
 
+    /// Folds the side cards back into the primary, then collapses the row.
     func collapse() {
-        guard isFannedOut else { return }
-        isFannedOut = false
-        relayoutIfNeeded()
+        guard isFannedOut, !isCollapsing else { return }
+        isCollapsing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.collapseAnimationSeconds) { [weak self] in
+            guard let self else { return }
+            self.isCollapsing = false
+            self.isFannedOut = false
+            self.relayoutIfNeeded()
+        }
     }
 
     /// Make a session the primary one, overriding the automatic focus rule. `nil` restores automatic.
@@ -290,12 +340,14 @@ final class PetViewModel: ObservableObject {
         petReactionMessage = pet.petPhrases.randomElement()
         petReactionExpiresAt = Date().addingTimeInterval(Self.petReactionDurationSeconds)
         petReactionTrigger &+= 1
+        relayoutIfNeeded()
     }
 
     private func expirePetReactionIfDue() {
         guard let expiresAt = petReactionExpiresAt, Date() >= expiresAt else { return }
         petReactionExpiresAt = nil
         petReactionMessage = nil
+        relayoutIfNeeded()
     }
 
     // MARK: - Configuration changes

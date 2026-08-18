@@ -23,20 +23,24 @@ struct RowLayout: Equatable {
     static let minimumCardWidth: CGFloat = 72
     static let maximumCardWidth: CGFloat = 132
     static let sideSpriteScaleFactor: CGFloat = 0.7
-    static let speechBubbleReservedHeight: CGFloat = 58
+    static let speechBubbleReservedHeight: CGFloat = 66
+    /// Gap between the bubble's tail and the top of the sprite.
+    static let speechBubbleBottomInset: CGFloat = 12
     static let sessionBadgeReservedHeight: CGFloat = 22
     static let verticalPadding: CGFloat = 12
     /// Rough width of one label character at the badge font, for card sizing without text measurement.
     static let approximateLabelCharacterWidth: CGFloat = 6.2
     static let labelHorizontalInset: CGFloat = 18
-    /// The speech bubble is centred over the primary card; the row reserves this much room around
-    /// that centre so the bubble never has to be pushed off the pet.
-    static let speechBubbleMaxWidth: CGFloat = 210
+    /// The speech bubble is centred over the primary card; the row reserves room for the current
+    /// bubble width around that centre so the bubble never has to be pushed off the pet.
+    static let speechBubbleMaxWidth: CGFloat = 300
     static let speechBubbleEdgeMargin: CGFloat = 4
 
     let cards: [Card]
     let contentSize: CGSize
     let primarySpriteSize: CGSize
+    /// Width the speech bubble will take for the current text (0 when there is no bubble).
+    let speechBubbleWidth: CGFloat
 
     var primaryCard: Card { cards.first(where: \.isPrimary) ?? cards[0] }
     var primaryCenterX: CGFloat { primaryCard.centerX }
@@ -52,7 +56,8 @@ struct RowLayout: Equatable {
         pixelScale: CGFloat,
         labels: [String],
         sessionIds: [String?],
-        primaryIndex: Int
+        primaryIndex: Int,
+        speechBubbleWidth: CGFloat = 0
     ) -> RowLayout {
         precondition(labels.count == sessionIds.count && !labels.isEmpty)
         let sideScale = sideScale(for: pixelScale)
@@ -74,7 +79,8 @@ struct RowLayout: Equatable {
         // Make room for the bubble around the primary card's centre (it may sit off-centre in the row).
         let primaryLeading = rowLeading + cardWidths[..<primaryIndex].reduce(0, +) + cardSpacing * CGFloat(primaryIndex)
         let primaryCenter = primaryLeading + cardWidths[primaryIndex] / 2
-        let bubbleHalf = speechBubbleMaxWidth / 2 + speechBubbleEdgeMargin
+        let bubbleWidth = min(speechBubbleMaxWidth, max(0, speechBubbleWidth))
+        let bubbleHalf = bubbleWidth / 2 + speechBubbleEdgeMargin
         let leftShortfall = max(0, bubbleHalf - primaryCenter)
         rowLeading += leftShortfall
         contentWidth += leftShortfall
@@ -101,7 +107,8 @@ struct RowLayout: Equatable {
         return RowLayout(
             cards: cards,
             contentSize: CGSize(width: contentWidth, height: contentHeight),
-            primarySpriteSize: primarySpriteSize
+            primarySpriteSize: primarySpriteSize,
+            speechBubbleWidth: bubbleWidth
         )
     }
 
