@@ -1,8 +1,10 @@
 """Generate the Airou pet — a Monster-Hunter-Felyne-inspired chibi cat — for claude-airou.
 
-Felyne cues this leans on: cream/white fur with darker (tan) tips on the ears, paws, feet and
-tail; an oversized round head with puffy cheeks; big pointed ears with pink insides; large round
-eyes; a small pink triangular nose over an "ω" mouth; whiskers; a long thin tail ending in a tuft.
+Felyne cues (checked against Capcom's "Airou from the Monster Hunter" art, the deformed plush and
+the MegaHouse figure): cream fur with brown "points" — an inverted-triangle mask down the middle
+of the face, brown ear backs with pink insides, brown paw/feet tips and tail tuft, a paw-print
+mark on the belly; an oversized round head with puffy cheeks; big round eyes sitting on the mask
+edges; a small nose over an "ω" mouth; prominent whiskers; a long thin tail ending in a tuft.
 
 Silhouette pieces are painted into a mask, the outline is derived automatically (mask pixels
 touching transparency), then features are overlaid. States only change eyes / mouth / props /
@@ -15,10 +17,10 @@ import pathlib
 W = H = 24
 
 PALETTE = {
-    "k": "#4A3428",  # outline (dark brown)
-    "c": "#F7F2E6",  # cream-white fur
-    "t": "#D6B283",  # tan tips (ears, paws, feet, tail tuft) and belly
-    "p": "#F0A3B4",  # pink ear insides / nose
+    "k": "#4A3020",  # outline (dark brown)
+    "c": "#F5ECD8",  # cream fur
+    "t": "#A6754A",  # brown "points": face mask, ear backs, paw/feet tips, tail tuft, paw print
+    "p": "#EFA6BC",  # pink ear insides / nose
     "e": "#1F1611",  # eyes
     "w": "#FFFFFF",  # eye highlight
     "y": "#F5C518",  # sparkle / question mark
@@ -103,44 +105,47 @@ def body_mask():
 def base(tail=0, raised_paw=None):
     g = render(body_mask())
 
-    # ears: pink inner triangles, tan tips
+    # ears: brown backs, pink insides
+    ear_fill = blank()
+    triangle(ear_fill, *LEFT_EAR); triangle(ear_fill, *RIGHT_EAR)
+    paint_inside(g, ear_fill, "t")
     inner = blank()
-    triangle(inner, (4.2, 2.0), (2.4, 6.0), (7.4, 4.4))
-    triangle(inner, (18.8, 2.0), (20.6, 6.0), (15.6, 4.4))
-    paint_inside(g, inner, "p")
-    tips = blank()
-    triangle(tips, LEFT_EAR[0], (2.6, 3.0), (6.4, 1.9))
-    triangle(tips, RIGHT_EAR[0], (20.4, 3.0), (16.6, 1.9))
-    paint_inside(g, tips, "t", only=("c", "p"))
+    triangle(inner, (4.2, 2.2), (2.6, 5.8), (7.2, 4.4))
+    triangle(inner, (18.8, 2.2), (20.4, 5.8), (15.8, 4.4))
+    paint_inside(g, inner, "p", only=("t",))
 
-    # big round eyes (5x5, rounded corners) with two highlights
+    # brown face mask: inverted triangle from between the ears down to the muzzle
+    mask = blank()
+    triangle(mask, (5.5, 3.0), (18.5, 3.0), (12.0, 15.2))
+    paint_inside(g, mask, "t")
+
+    # big round eyes (5x5, rounded corners) sitting on the mask edges, two highlights
     for x0 in (5, 14):
         for x in range(x0, x0 + 5):
             for y in range(8, 13):
                 put(g, x, y, "e")
         for (x, y) in ((x0, 8), (x0 + 4, 8), (x0, 12), (x0 + 4, 12)):
-            put(g, x, y, "c")
+            put(g, x, y, "c" if g[y][x] != "t" else "t")
         put(g, x0 + 1, 9, "w"); put(g, x0 + 2, 9, "w"); put(g, x0 + 3, 11, "w")
 
-    # pink triangular nose over an "ω" mouth
-    put(g, 11, 13, "p"); put(g, 12, 13, "p"); put(g, 11, 14, "p"); put(g, 12, 14, "p")
+    # small pink nose at the mask tip, "ω" mouth on the cream muzzle below
+    put(g, 11, 13, "p"); put(g, 12, 13, "p")
     for (x, y) in ((9, 15), (11, 15), (13, 15), (10, 16), (12, 16)):
         put(g, x, y, "k")
 
-    # whiskers, two per side, poking past the cheeks
-    for (x, y) in ((1, 11), (2, 11), (1, 13), (2, 13), (21, 11), (22, 11), (21, 13), (22, 13)):
+    # whiskers, two per side, from the cheeks
+    for (x, y) in ((1, 10), (2, 10), (1, 12), (2, 12), (21, 10), (22, 10), (21, 12), (22, 12)):
         put(g, x, y, "k")
 
-    # tan paw tips / feet tips (Felyne "socks")
+    # brown paw / feet tips
     for (x, y) in ((5, 19), (6, 19), (17, 19), (18, 19)):
         put(g, x, y, "t")
     for x in (7, 8, 9, 14, 15, 16):
         put(g, x, 22, "t")
 
-    # belly
-    for x in range(10, 14):
-        for y in range(18, 21):
-            put(g, x, y, "t")
+    # paw-print mark on the belly (three toes over a pad)
+    for (x, y) in ((10, 17), (12, 17), (14, 17), (11, 18), (12, 18), (13, 18), (11, 19), (12, 19), (13, 19)):
+        put(g, x, y, "t")
 
     # long thin tail curling up on the right, ending in a fluffy tan tuft; two poses
     if tail == 0:
