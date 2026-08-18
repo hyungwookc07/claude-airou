@@ -33,6 +33,8 @@ struct RowLayout: Equatable {
     /// Rough width of one label character at the badge font, for card sizing without text measurement.
     static let approximateLabelCharacterWidth: CGFloat = 6.2
     static let labelHorizontalInset: CGFloat = 18
+    /// Room for the status icon that sits at the right end of the label capsule.
+    static let labelStatusIconAllowance: CGFloat = 18
     /// The speech bubble is centred over the primary card; the row reserves room for the current
     /// bubble width around that centre so the bubble never has to be pushed off the pet.
     static let speechBubbleMaxWidth: CGFloat = 300
@@ -76,7 +78,7 @@ struct RowLayout: Equatable {
         for (index, label) in labels.enumerated() {
             let scale = index == primaryIndex ? pixelScale : sideScale
             let spriteWidth = CGFloat(gridSize.width) * scale
-            let labelWidth = CGFloat(label.count) * approximateLabelCharacterWidth + labelHorizontalInset
+            let labelWidth = CGFloat(label.count) * approximateLabelCharacterWidth + labelHorizontalInset + labelStatusIconAllowance
             let width = min(maximumCardWidth, max(minimumCardWidth, spriteWidth, labelWidth))
             cardWidths.append((width / 2).rounded(.up) * 2) // even, so card centres are whole points
         }
