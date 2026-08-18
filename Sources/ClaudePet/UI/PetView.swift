@@ -157,7 +157,8 @@ struct StatusBadge: View {
         case .working:
             BadgeIcon(systemName: "gearshape.fill", tint: .blue, isPulsing: false, isSpinning: true)
         case .thinking:
-            ThinkingDots()
+            // The sprite's own thinking frames (thought dots, eyes up) carry this state; a badge would be redundant.
+            EmptyView()
         case .hello:
             BadgeIcon(systemName: "hand.wave.fill", tint: .yellow, isPulsing: false, isSpinning: false)
         case .idle:
@@ -188,29 +189,6 @@ struct BadgeIcon: View {
             .animation(isSpinning ? .linear(duration: 2.4).repeatForever(autoreverses: false) : .default, value: isRotating)
             .onAppear { if isSpinning { isRotating = true } }
             .transition(.scale.combined(with: .opacity))
-    }
-}
-
-struct ThinkingDots: View {
-    @State private var phase = 0
-
-    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Color.primary.opacity(index == phase ? 0.9 : 0.35))
-                    .frame(width: 4, height: 4)
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12)))
-        .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
-        .onReceive(timer) { _ in phase = (phase + 1) % 3 }
-        .transition(.scale.combined(with: .opacity))
     }
 }
 
