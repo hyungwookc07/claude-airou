@@ -10,6 +10,11 @@ Claude Code sessions. The overlay swaps sprites as Claude works: `idle`, `thinki
 `waiting_approval`, `needs_input`, `done`, `error`, `hello`. The pet is a JSON file; the
 `claude-airou` binary validates and renders it.
 
+No shell or `claude-airou` binary available (e.g. Claude chat with the claude-airou MCP server
+installed)? Use the MCP tools instead: `hatch_pet` takes the same definition object, validates,
+saves and returns the rendered sheet in one call; `preview_pet` shows an existing pet. The format
+and design rules below still apply — skip the file/CLI steps of the workflow.
+
 ## Workflow
 
 1. **Concept.** Take the concept from the arguments. If none, ask one short question:

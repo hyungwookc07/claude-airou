@@ -7,7 +7,7 @@ LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-airou.overlay.plist
 LEGACY_LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
 LEGACY_BINARY := $(BIN_DIR)/claude-pet
 
-.PHONY: build install hooks statusline skill uninstall run demo render-all autostart no-autostart clean
+.PHONY: build install hooks statusline mcp skill uninstall run demo render-all autostart no-autostart clean
 
 ## Build a release binary (.build/release/claude-airou)
 build:
@@ -31,16 +31,21 @@ hooks: install
 statusline: install
 	$(BIN_DIR)/claude-airou install-statusline
 
+## Register the MCP server in the Claude desktop app, so Claude chat can drive the pet
+mcp: install
+	$(BIN_DIR)/claude-airou install-mcp
+
 ## Install the /hatch-pet skill for Claude Code (~/.claude/skills/hatch-pet)
 skill:
 	mkdir -p $(SKILL_DIR)
 	cp skills/hatch-pet/SKILL.md $(SKILL_DIR)/SKILL.md
 	@echo "installed $(SKILL_DIR)/SKILL.md"
 
-## Remove hooks, binary, skill and launch agent (keeps ~/.claude-airou)
+## Remove hooks, MCP entry, binary, skill and launch agent (keeps ~/.claude-airou)
 uninstall:
 	-$(BIN_DIR)/claude-airou uninstall-hooks
 	-$(BIN_DIR)/claude-airou uninstall-statusline
+	-$(BIN_DIR)/claude-airou uninstall-mcp
 	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
 	-launchctl bootout gui/$$(id -u) $(LEGACY_LAUNCH_AGENT) 2>/dev/null
 	rm -f $(LAUNCH_AGENT) $(LEGACY_LAUNCH_AGENT) $(BIN_DIR)/claude-airou $(LEGACY_BINARY)

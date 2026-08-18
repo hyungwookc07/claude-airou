@@ -7,6 +7,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 - 네이티브 macOS 오버레이 (Swift, AppKit + SwiftUI). 외부 의존성 0, 바이너리 하나.
 - Claude Code **hooks**로 상태를 받는다 → 터미널 CLI, 데스크톱 앱, IDE 확장 어디서 돌려도 동작.
+- **클로드 챗**(Claude 데스크톱 앱)도 지원: MCP 서버(`make mcp`)로 챗의 Claude가 펫을 움직이고 새 펫도 부화시킨다 — [아래 참고](#클로드-챗데스크톱-앱에서-쓰기).
 - 항상 위에 떠 있고, 포커스를 뺏지 않고, 모든 Space/전체화면 위에 보인다. 드래그로 옮기고 위치를 기억한다.
 - 여러 세션을 동시에 추적. 승인이 필요한 세션이 있으면 그 세션을 우선 표시.
 - 펫은 JSON 픽셀아트 팩. 내장 펫 + `~/.claude-airou/pets/*.json` 커스텀 펫. `/hatch-pet` 스킬로 Claude에게 새 펫을 만들게 할 수 있다 (Codex의 `/hatch` 대응).
@@ -26,6 +27,7 @@ git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
 make install      # → ~/.local/bin/claude-airou
 make hooks        # ~/.claude/settings.json 에 hook 등록 (백업 파일을 먼저 만든다)
 make statusline   # (선택) 배터리 게이지에 Claude Code 상태줄 데이터를 공급 (아래 참고)
+make mcp          # (선택) 클로드 챗(데스크톱 앱)에서도 펫이 반응하게 (아래 참고)
 make skill        # (선택) /hatch-pet 스킬을 ~/.claude/skills 에 설치
 claude-airou        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
 ```
@@ -79,6 +81,8 @@ claude-airou render PET --out DIR  모든 프레임을 PNG로 (sheet.png 포함)
 claude-airou preview PET           ASCII 미리보기
 claude-airou snapshot --out a.png  실행 중인 오버레이를 PNG로 저장 (화면 녹화 권한 불필요)
 claude-airou install-hooks [--print]   / uninstall-hooks
+claude-airou mcp                   클로드 챗용 MCP 서버 (stdio; 데스크톱 앱이 직접 실행한다)
+claude-airou install-mcp [--print]     / uninstall-mcp
 ```
 
 펫을 **클릭**하면 쓰다듬기(하트 + 대사), **드래그**하면 이동, **우클릭**하거나 메뉴바 🐾를 누르면 메뉴:
@@ -104,6 +108,27 @@ Claude Code는 상태줄 명령에 `context_window.used_percentage`, `rate_limit
 - 펼쳐지고 접힐 때 가운데 펫은 화면에서 움직이지 않는다 (창만 좌우로 늘었다 줄어듦).
 
 설정은 `~/.claude-airou/config.json`.
+
+## 클로드 챗(데스크톱 앱)에서 쓰기
+
+클로드 챗에는 hook이 없다. 그래서 챗이 허용하는 통로인 **MCP 서버**로 연결한다.
+
+```bash
+make mcp     # 또는: claude-airou install-mcp   (설정 백업을 먼저 만든다)
+```
+
+Claude 데스크톱 앱을 완전히 종료(Cmd-Q)했다가 다시 열면, 오버레이에 Claude Code 세션들과 나란히 **Claude Chat** 세션이 생긴다:
+
+- 앱을 켜면 👋 인사.
+- 대화 중에는 Claude가 `pet_status` 도구로 펫을 갱신한다 — 생각 중 / 작업 중 / ✅ 완료 / ❗ 에러, 답을 기다릴 땐 🟠 `needs_input`, 말풍선 한 줄과 함께.
+- `hatch_pet`으로 챗에서 바로 펫을 부화시킨다: Claude가 픽셀아트를 설계하면 서버가 검증해 `~/.claude-airou/pets/`에 저장하고, 렌더링된 스프라이트 시트가 대화에 그대로 돌아와서 Claude가 보고 다듬는다 — 파일 접근도 `/hatch-pet` 스킬도 필요 없다. `list_pets` / `preview_pet`도 있다.
+- 챗에는 Stop 이벤트가 없으므로, 조용해지면 3분 뒤 바쁨 상태가 자동으로 idle이 된다.
+
+hook이 없는 만큼 펫은 Claude가 도구를 부를 때만 움직인다. 서버의 MCP instructions가 상태가 바뀔 때마다 펫을 갱신하라고 Claude에게 일러두므로 대체로 알아서 하지만, Claude 프로필 설정에 "작업하는 동안 pet_status로 데스크톱 펫을 갱신해줘" 한 줄을 넣어두면 거의 확실해진다.
+
+한계: 지원 대상은 **데스크톱 앱**이다 — 브라우저의 claude.ai는 로컬 프로세스에 접근할 수 없다. Claude Code 세션은 hook을 그대로 쓰는 편이 낫다(승인·도구별 이벤트 등 신호가 더 풍부하다); MCP 서버는 챗용이다.
+
+해제는 `claude-airou uninstall-mcp`. 앱 설정(`~/Library/Application Support/Claude/claude_desktop_config.json`)은 수정 전에 항상 백업되고, 서버 로그는 `~/.claude-airou/mcp.log`에 남는다.
 
 ## 커스텀 펫 만들기
 
@@ -148,11 +173,12 @@ Claude Code에서:
 - 특정 세션이 승인 대기에 멈춰 보임 → 세션이 죽었을 수 있다. 30분 뒤 자동으로 idle, `claude-airou status`로 확인, `rm ~/.claude-airou/state/<id>.json`.
 - 오버레이가 화면 밖 → 메뉴바 🐾 → Reset position.
 - 클릭 통과를 켜서 펫을 클릭할 수 없게 됐다면 메뉴바 🐾에서 끈다.
+- 클로드 챗에 반응이 없음 → `make mcp` 후 데스크톱 앱을 완전히 종료했다 다시 열었는지, 앱의 Settings → Developer에 `claude-airou`가 실행 중으로 보이는지, `~/.claude-airou/mcp.log`에 줄이 찍히는지 확인.
 
 ## 제거
 
 ```bash
-make uninstall          # hooks 제거(백업 생성), 바이너리/스킬/LaunchAgent 삭제
+make uninstall          # hooks·MCP 항목 제거(백업 생성), 바이너리/스킬/LaunchAgent 삭제
 rm -rf ~/.claude-airou    # 설정·펫·상태까지 지우려면
 ```
 
@@ -163,7 +189,7 @@ swift build && .build/debug/claude-airou run
 make render-all         # 내장 펫 전부 렌더 → render/<id>/sheet.png
 ```
 
-구조: `Sources/ClaudeAirou/{Hook,State,Pets,UI,Install,CLI}`. hook 이벤트 → 상태 매핑은 `Hook/HookEventMapper.swift` 한 곳에 있다.
+구조: `Sources/ClaudeAirou/{Hook,MCP,State,Pets,UI,Install,CLI}`. hook 이벤트 → 상태 매핑은 `Hook/HookEventMapper.swift` 한 곳에 있고, 챗용 도구는 `MCP/MCPPetTools.swift`에 있다.
 
 ## 라이선스
 

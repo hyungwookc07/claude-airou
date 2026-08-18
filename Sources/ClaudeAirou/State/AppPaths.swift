@@ -15,6 +15,7 @@ enum AppPaths {
     static var petsDirectory: URL { rootDirectory.appendingPathComponent("pets", isDirectory: true) }
     static var configFile: URL { rootDirectory.appendingPathComponent("config.json") }
     static var hookLogFile: URL { rootDirectory.appendingPathComponent("hook.log") }
+    static var mcpLogFile: URL { rootDirectory.appendingPathComponent("mcp.log") }
     /// `claude-airou snapshot` drops this file; the running overlay answers by writing `snapshotImageFile`.
     static var snapshotRequestFile: URL { rootDirectory.appendingPathComponent("snapshot.request") }
     static var snapshotImageFile: URL { rootDirectory.appendingPathComponent("snapshot.png") }
@@ -26,6 +27,13 @@ enum AppPaths {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude", isDirectory: true)
             .appendingPathComponent("settings.json")
+    }
+
+    /// Where the Claude desktop app (chat) reads its MCP servers from.
+    static var claudeDesktopConfigFile: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json")
     }
 
     static func ensureDirectoryExists(_ url: URL) throws {

@@ -6,6 +6,7 @@ creature floats in a corner of your screen and shows what Claude is doing right 
 
 - Native macOS overlay (Swift, AppKit + SwiftUI). Zero dependencies, one binary.
 - Driven by Claude Code **hooks**, so it works with the terminal CLI, the desktop app and IDE extensions alike.
+- **Claude chat** (the Claude desktop app) works too: an MCP server (`make mcp`) lets chat drive the pet and hatch new ones — [see below](#using-it-from-claude-chat-the-claude-desktop-app).
 - Always on top, never steals focus, visible on every Space and over full-screen apps. Drag it anywhere; it remembers where it was.
 - Tracks several sessions at once and puts the one that needs you first.
 - Pets are JSON pixel-art packs: 8 built-ins plus your own in `~/.claude-airou/pets/*.json`.
@@ -28,6 +29,7 @@ git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
 make install      # → ~/.local/bin/claude-airou
 make hooks        # registers the hook in ~/.claude/settings.json (a backup is written first)
 make statusline   # optional: feeds the battery gauge from the Claude Code status line (see below)
+make mcp          # optional: lets Claude chat (the desktop app) drive the pet too (see below)
 make skill        # optional: installs the /hatch-pet skill into ~/.claude/skills
 claude-airou        # start the overlay (menu bar 🐾 icon + the pet)
 ```
@@ -80,6 +82,8 @@ claude-airou render PET --out DIR  render every frame to PNG (+ sheet.png)
 claude-airou preview PET           ASCII preview
 claude-airou snapshot --out a.png  save a PNG of the running overlay (no screen-recording permission needed)
 claude-airou install-hooks [--print]   / uninstall-hooks
+claude-airou mcp                   MCP server for Claude chat (stdio; the desktop app runs this)
+claude-airou install-mcp [--print]     / uninstall-mcp
 ```
 
 **Click** the pet to pet it (hearts + a line of dialogue), **drag** to move, **right-click** (or the menu bar 🐾) for the menu:
@@ -105,6 +109,27 @@ Collapsed, the pet shows the session that matters most (waiting for approval > b
 - The primary pet stays exactly where it was on screen while the row grows and shrinks around it.
 
 Preferences live in `~/.claude-airou/config.json`.
+
+## Using it from Claude chat (the Claude desktop app)
+
+Claude chat has no hook system, so the pet plugs into chat the way chat allows: as an **MCP server**.
+
+```bash
+make mcp     # or: claude-airou install-mcp   (a backup of the config is written first)
+```
+
+Quit the Claude desktop app completely (Cmd-Q) and reopen it. The overlay now shows a **Claude Chat** session alongside your Claude Code ones:
+
+- 👋 hello when the app launches.
+- While chatting, Claude updates the pet with the `pet_status` tool — thinking / working / ✅ done / ❗ error, and 🟠 `needs_input` when it is waiting for your answer, with a one-line speech bubble.
+- `hatch_pet` hatches custom pets straight from a chat: Claude designs the pixel art, the server validates and saves it to `~/.claude-airou/pets/`, and the rendered sprite sheet is returned into the conversation so Claude can look at it and iterate — no file access or `/hatch-pet` skill needed. `list_pets` and `preview_pet` round it off.
+- Busy states reset to idle after 3 minutes of silence (chat has no Stop event).
+
+Because there are no hooks, the pet only moves when Claude calls the tools. The server's MCP instructions ask Claude to keep the pet honest at every transition, and it generally does; adding one line to your Claude profile preferences ("keep my desktop pet updated with pet_status while you work") makes it near-deterministic.
+
+Limits: this covers the **desktop app** — claude.ai in a browser cannot reach local processes. Claude Code sessions should keep using hooks (richer signal: approvals, per-tool events); the MCP server is for chat.
+
+Undo with `claude-airou uninstall-mcp`. The app's config (`~/Library/Application Support/Claude/claude_desktop_config.json`) is backed up before every change; the server logs to `~/.claude-airou/mcp.log`.
 
 ## Making your own pet
 
@@ -149,11 +174,12 @@ The built-in pets live in `Sources/ClaudeAirou/Resources/pets/` and are embedded
 - A session seems stuck on "waiting for approval" → the session may have died. It decays to idle after 20 minutes; check with `claude-airou status`, or `rm ~/.claude-airou/state/<id>.json`.
 - The overlay went off-screen → menu bar 🐾 → Reset position.
 - You turned on click-through and can no longer click the pet → turn it off from the menu bar 🐾.
+- The pet ignores Claude chat → make sure the desktop app was fully quit and reopened after `make mcp`, that the app's Settings → Developer lists `claude-airou` as running, and that lines appear in `~/.claude-airou/mcp.log`.
 
 ## Uninstall
 
 ```bash
-make uninstall          # removes the hooks (with a backup), the binary, the skill and the LaunchAgent
+make uninstall          # removes the hooks and the MCP entry (with backups), the binary, the skill and the LaunchAgent
 rm -rf ~/.claude-airou    # also removes settings, custom pets and state
 ```
 
@@ -164,7 +190,7 @@ swift build && .build/debug/claude-airou run
 make render-all         # renders every built-in pet to render/<id>/sheet.png
 ```
 
-Layout: `Sources/ClaudeAirou/{Hook,State,Pets,UI,Install,CLI}`. The event → state mapping lives in one place, `Hook/HookEventMapper.swift`; the merge rules for concurrent events are in `Hook/HookMergePolicy.swift`.
+Layout: `Sources/ClaudeAirou/{Hook,MCP,State,Pets,UI,Install,CLI}`. The event → state mapping lives in one place, `Hook/HookEventMapper.swift`; the merge rules for concurrent events are in `Hook/HookMergePolicy.swift`; the chat-side tools are in `MCP/MCPPetTools.swift`.
 
 ## License
 

@@ -20,6 +20,13 @@ enum CommandLineInterface {
                                        existing status line keeps running (passthrough)
       claude-airou uninstall-statusline  Restore the original status line
       claude-airou statusline            Status line entry point (reads the status line JSON on stdin)
+      claude-airou mcp                   MCP server over stdio, so Claude chat (the Claude
+                                       desktop app) can drive the pet (pet_status, hatch_pet, …)
+      claude-airou install-mcp [--print] [--config PATH]
+                                       Register the MCP server in the Claude desktop app
+                                       (backup first); restart the app afterwards
+                                       --print only prints the JSON snippet, changes nothing
+      claude-airou uninstall-mcp [--config PATH]
       claude-airou simulate STATE [--message TEXT] [--session ID] [--cwd PATH]
                                        Write a fake session so you can see the pet react
                                        STATE: \(PetState.allCases.map(\.rawValue).joined(separator: " | ")) | clear | demo
@@ -38,9 +45,11 @@ enum CommandLineInterface {
     FILES
       ~/.claude-airou/config.json        preferences (pet, size, position)
       ~/.claude-airou/pets/*.json        your custom pets (see skills/hatch-pet)
-      ~/.claude-airou/state/*.json       live session state written by the hook
+      ~/.claude-airou/state/*.json       live session state written by the hook and the MCP server
       ~/.claude-airou/hook.log           what the hook saw (auto-truncated)
+      ~/.claude-airou/mcp.log            what the MCP server saw (auto-truncated)
       ~/.claude-airou/statusline-passthrough.json   your original statusLine while claude-airou's is installed
+      ~/Library/Application Support/Claude/claude_desktop_config.json   the desktop app's MCP servers
     """
 
     struct ParsedArguments {
@@ -114,6 +123,12 @@ enum CommandLineInterface {
             return runInstallHooks(parsed)
         case "uninstall-hooks":
             return runUninstallHooks(parsed)
+        case "mcp":
+            return MCPServerCommand.run()
+        case "install-mcp":
+            return runInstallMCP(parsed)
+        case "uninstall-mcp":
+            return runUninstallMCP(parsed)
         case "simulate":
             return runSimulate(rest, parsed)
         case "pets", "list":
@@ -192,6 +207,44 @@ enum CommandLineInterface {
             return 0
         } catch {
             StandardError.print("claude-airou: uninstall-statusline failed: \(error.localizedDescription)")
+            return 1
+        }
+    }
+
+    private static func mcpConfigURL(from parsed: ParsedArguments) -> URL {
+        if let path = parsed.option("config") {
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        }
+        return AppPaths.claudeDesktopConfigFile
+    }
+
+    private static func runInstallMCP(_ parsed: ParsedArguments) -> Int32 {
+        let installer = MCPInstaller(configURL: mcpConfigURL(from: parsed))
+        if parsed.hasFlag("print") {
+            print(installer.snippetJSON())
+            return 0
+        }
+        do {
+            let report = try installer.install()
+            print("Claude desktop app MCP server registered.")
+            print(report.summaryText)
+            print("\nQuit the Claude desktop app completely (Cmd-Q) and reopen it for the server to load.")
+            return 0
+        } catch {
+            StandardError.print("claude-airou: install-mcp failed: \(error.localizedDescription)")
+            return 1
+        }
+    }
+
+    private static func runUninstallMCP(_ parsed: ParsedArguments) -> Int32 {
+        let installer = MCPInstaller(configURL: mcpConfigURL(from: parsed))
+        do {
+            let report = try installer.uninstall()
+            print("Claude desktop app MCP server removed.")
+            print(report.summaryText)
+            return 0
+        } catch {
+            StandardError.print("claude-airou: uninstall-mcp failed: \(error.localizedDescription)")
             return 1
         }
     }
@@ -329,7 +382,7 @@ enum CommandLineInterface {
             }
             return 0
         } catch let decodingError as DecodingError {
-            StandardError.print("INVALID JSON STRUCTURE: \(describe(decodingError))")
+            StandardError.print("INVALID JSON STRUCTURE: \(describeDecodingError(decodingError))")
             return 1
         } catch {
             StandardError.print("INVALID:\n\(error.localizedDescription)")
@@ -337,7 +390,8 @@ enum CommandLineInterface {
         }
     }
 
-    private static func describe(_ error: DecodingError) -> String {
+    /// Also used by the MCP `hatch_pet` tool to explain a malformed definition.
+    static func describeDecodingError(_ error: DecodingError) -> String {
         switch error {
         case let .keyNotFound(key, context):
             return "missing key \"\(key.stringValue)\" at \(context.codingPath.map(\.stringValue).joined(separator: "."))"
