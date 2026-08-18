@@ -182,6 +182,14 @@ make uninstall          # hooks·MCP 항목 제거(백업 생성), 바이너리/
 rm -rf ~/.claude-airou    # 설정·펫·상태까지 지우려면
 ```
 
+## 러스트 포트
+
+크로스플랫폼 재작성판이 [`rust/`](rust/README.md)에 있다 — CLI도 온디스크 포맷도 동일해서
+두 바이너리를 섞어 쓸 수 있고(예: 오버레이는 Swift, hook/MCP는 Rust), macOS 오버레이부터
+시작해 윈도우·리눅스로 간다. 장기적으로는 Swift 앱을 완전히 대체하는 게 목표이며 로드맵과
+현재 한계는 해당 README에 있다. 이 코드베이스로 러스트를 공부하는 가이드는
+[`rust/LEARNING.ko.md`](rust/LEARNING.ko.md).
+
 ## 개발
 
 ```bash

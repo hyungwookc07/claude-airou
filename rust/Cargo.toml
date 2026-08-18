@@ -18,7 +18,7 @@ winit = "0.30"
 softbuffer = "0.4"
 tray-icon = "0.19"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSApplication", "NSResponder", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSApplication", "NSResponder", "NSRunningApplication", "NSView"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]

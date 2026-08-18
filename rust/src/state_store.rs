@@ -48,6 +48,7 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 impl StateStore {
+    #[allow(dead_code)] // constructor for tests and non-default directories
     pub fn new(directory: PathBuf) -> Self {
         StateStore { directory }
     }

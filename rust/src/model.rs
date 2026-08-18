@@ -77,6 +77,7 @@ impl PetState {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay-only today
     pub fn display_label(self) -> &'static str {
         match self {
             PetState::Hello => "Hello",
@@ -222,16 +223,19 @@ impl SessionUsageSnapshot {
     /// Identical transcript estimates are re-written at most this often.
     pub const TRANSCRIPT_REWRITE_INTERVAL_SECS: f64 = 300.0;
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn context_remaining_percentage(&self) -> Option<f64> {
         self.context_used_percentage
             .map(|used| (100.0 - used).clamp(0.0, 100.0))
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn five_hour_remaining_percentage(&self) -> Option<f64> {
         self.five_hour_used_percentage
             .map(|used| (100.0 - used).clamp(0.0, 100.0))
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn seven_day_remaining_percentage(&self) -> Option<f64> {
         self.seven_day_used_percentage
             .map(|used| (100.0 - used).clamp(0.0, 100.0))
@@ -327,6 +331,7 @@ pub enum GaugeMetric {
 }
 
 impl GaugeMetric {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn value(self, usage: Option<&SessionUsageSnapshot>) -> Option<f64> {
         let usage = usage?;
         match self {
@@ -392,6 +397,7 @@ impl AppConfig {
             .unwrap_or_default()
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay persists config
     pub fn save(&self) {
         self.save_to(&crate::paths::config_file());
     }

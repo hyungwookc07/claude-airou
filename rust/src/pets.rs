@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 pub const TRANSPARENT_CHARS: [char; 2] = ['.', ' '];
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // via frames_per_second (overlay)
 pub const DEFAULT_FPS: f64 = 3.0;
 pub const MIN_GRID_SIDE: usize = 4;
 pub const MAX_GRID_SIDE: usize = 64;
@@ -66,6 +67,7 @@ impl PetDefinition {
     }
 
     /// `fps` clamped to 0.5–12, default 3 (mirrors `framesPerSecond`).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay animation
     pub fn frames_per_second(&self) -> f64 {
         match self.fps {
             Some(fps) if fps > 0.0 => fps.max(0.5).min(12.0),
@@ -74,6 +76,7 @@ impl PetDefinition {
     }
 
     /// Random click phrases; falls back to ["♥"] when none defined.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay click reaction
     pub fn pet_phrases(&self) -> Vec<String> {
         let list = self
             .phrases

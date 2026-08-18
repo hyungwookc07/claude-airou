@@ -183,6 +183,14 @@ make uninstall          # removes the hooks and the MCP entry (with backups), th
 rm -rf ~/.claude-airou    # also removes settings, custom pets and state
 ```
 
+## Rust port
+
+A cross-platform rewrite lives in [`rust/`](rust/README.md) — same CLI, same on-disk formats
+(the two binaries can be mixed freely: e.g. Swift overlay + Rust hook/MCP), macOS overlay
+first, Windows and Linux next. The long-term plan is for it to replace the Swift app; the
+roadmap and current limitations are in its README. 러스트 공부를 겸해 읽는 가이드는
+[`rust/LEARNING.ko.md`](rust/LEARNING.ko.md).
+
 ## Development
 
 ```bash

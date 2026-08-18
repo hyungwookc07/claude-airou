@@ -41,6 +41,7 @@ pub fn statusline_passthrough_file() -> PathBuf {
     root_dir().join("statusline-passthrough.json")
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay-only today
 pub fn overlay_lock_file() -> PathBuf {
     root_dir().join("overlay.lock")
 }

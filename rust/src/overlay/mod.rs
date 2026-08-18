@@ -27,9 +27,59 @@
 //! Deliberately deferred (documented in rust/README.md): session fan-out row, snapshot/
 //! click request files, per-session pinning.
 //!
+//! NOTE (transparency fallback): softbuffer 0.4's buffer format is 0RGB with no alpha
+//! channel, so per-pixel window transparency is not achievable on macOS with softbuffer
+//! alone. The overlay draws an opaque dark rounded-card look instead (see `draw.rs` and
+//! `window.rs` headers). Everything else behaves per the spec.
+//!
 //! Everything here is cfg(target_os = "macos"); keep the platform-specific window tweaks
 //! in one place so the future Windows/Linux backends only replace that corner.
 
+mod draw;
+mod font;
+mod lock;
+mod logic;
+mod tray;
+mod window;
+
+use crate::model::AppConfig;
+use crate::pets::PetLibrary;
+
+/// Appends one line to `~/.claude-airou/overlay.log` (same shape as hook.log/mcp.log).
+pub(crate) fn log(line: &str) {
+    crate::logging::append(&crate::paths::root_dir().join("overlay.log"), line);
+}
+
 pub fn run() -> i32 {
-    todo!("implement the macOS overlay (winit + softbuffer + tray-icon)")
+    let lock_path = crate::paths::overlay_lock_file();
+    let pid = std::process::id();
+    if lock::acquire(&lock_path, pid, std::time::SystemTime::now()) == lock::LockOutcome::AlreadyRunning
+    {
+        crate::logging::eprint_line(&format!(
+            "claude-airou: the overlay is already running (lock: {}). Nothing to do.",
+            lock_path.display()
+        ));
+        return 0;
+    }
+
+    let config = AppConfig::load();
+    let library = PetLibrary::load();
+    for problem in &library.load_problems {
+        crate::logging::eprint_line(&format!("claude-airou: skipping user pet — {problem}"));
+    }
+    let selected = library
+        .resolve_selected(config.selected_pet_id.as_deref())
+        .map(|loaded| loaded.definition.clone());
+    let Some(pet) = selected else {
+        // Swift exits through NSApp.terminate (status 0) after printing the same line.
+        crate::logging::eprint_line(
+            "claude-airou: no valid pets found (built-ins failed to load). Exiting.",
+        );
+        lock::release(&lock_path, pid);
+        return 0;
+    };
+
+    let code = window::run_overlay(config, library, pet);
+    lock::release(&lock_path, pid);
+    code
 }
