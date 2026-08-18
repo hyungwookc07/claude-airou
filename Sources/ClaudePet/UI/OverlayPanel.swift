@@ -108,7 +108,7 @@ final class OverlayPanel: NSPanel {
     func resizeKeepingBottomLeft(to size: CGSize) {
         var newFrame = frame
         newFrame.size = size
-        setFrame(newFrame, display: true, animate: false)
+        setFrame(newFrame, display: false, animate: false)
         nudgeOntoScreen()
     }
 
@@ -116,7 +116,9 @@ final class OverlayPanel: NSPanel {
     /// screen x — used to keep the primary pet still while the row fans out around it.
     func resize(to size: CGSize, keepingContentX contentX: CGFloat, atScreenX screenX: CGFloat) {
         let newFrame = NSRect(x: (screenX - contentX).rounded(), y: frame.minY, width: size.width, height: size.height)
-        setFrame(newFrame, display: true, animate: false)
+        // display: false — let the next display pass draw the *new* SwiftUI content into the new frame
+        // instead of flashing the old content centred in it for one frame.
+        setFrame(newFrame, display: false, animate: false)
         nudgeOntoScreen()
     }
 
@@ -188,6 +190,7 @@ final class PetContainerView: NSView {
         if !didDrag, mouseDownEvent != nil {
             // Content coordinates: x from the left, y from the top (matches SwiftUI's layout space).
             let location = convert(event.locationInWindow, from: nil)
+            OverlayLog.append("mouseUp window=(\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y))) view=(\(Int(location.x)),\(Int(location.y))) bounds=\(Int(bounds.width))x\(Int(bounds.height)) frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)) windowFrame=\(window.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "-")")
             onClick?(NSPoint(x: location.x, y: bounds.height - location.y))
         }
         mouseDownEvent = nil

@@ -29,6 +29,10 @@ struct RowLayout: Equatable {
     /// Rough width of one label character at the badge font, for card sizing without text measurement.
     static let approximateLabelCharacterWidth: CGFloat = 6.2
     static let labelHorizontalInset: CGFloat = 18
+    /// The speech bubble is centred over the primary card; the row reserves this much room around
+    /// that centre so the bubble never has to be pushed off the pet.
+    static let speechBubbleMaxWidth: CGFloat = 210
+    static let speechBubbleEdgeMargin: CGFloat = 4
 
     let cards: [Card]
     let contentSize: CGSize
@@ -60,12 +64,23 @@ struct RowLayout: Equatable {
             let spriteWidth = CGFloat(gridSize.width) * scale
             let labelWidth = CGFloat(label.count) * approximateLabelCharacterWidth + labelHorizontalInset
             let width = min(maximumCardWidth, max(minimumCardWidth, spriteWidth, labelWidth))
-            cardWidths.append(width.rounded())
+            cardWidths.append((width / 2).rounded(.up) * 2) // even, so card centres are whole points
         }
 
         let rowWidth = cardWidths.reduce(0, +) + cardSpacing * CGFloat(max(0, cardWidths.count - 1))
-        let contentWidth = max(minimumContentWidth, rowWidth + horizontalPadding * 2)
-        let rowLeading = ((contentWidth - rowWidth) / 2).rounded()
+        var contentWidth = max(minimumContentWidth, rowWidth + horizontalPadding * 2)
+        var rowLeading = ((contentWidth - rowWidth) / 2).rounded()
+
+        // Make room for the bubble around the primary card's centre (it may sit off-centre in the row).
+        let primaryLeading = rowLeading + cardWidths[..<primaryIndex].reduce(0, +) + cardSpacing * CGFloat(primaryIndex)
+        let primaryCenter = primaryLeading + cardWidths[primaryIndex] / 2
+        let bubbleHalf = speechBubbleMaxWidth / 2 + speechBubbleEdgeMargin
+        let leftShortfall = max(0, bubbleHalf - primaryCenter)
+        rowLeading += leftShortfall
+        contentWidth += leftShortfall
+        let rightShortfall = max(0, (primaryCenter + leftShortfall + bubbleHalf) - contentWidth)
+        contentWidth += rightShortfall
+
         let contentHeight = speechBubbleReservedHeight + primarySpriteSize.height + sessionBadgeReservedHeight + verticalPadding
 
         var cards: [Card] = []

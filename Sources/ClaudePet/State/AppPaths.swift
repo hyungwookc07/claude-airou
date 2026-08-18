@@ -32,3 +32,30 @@ enum AppPaths {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 }
+
+/// Tiny append-only log for the overlay (clicks, layout) at `~/.claude-pet/overlay.log`; truncated when large.
+enum OverlayLog {
+    static let maxBytes: UInt64 = 256 * 1024
+
+    static func append(_ line: String) {
+        let url = AppPaths.rootDirectory.appendingPathComponent("overlay.log")
+        do {
+            try AppPaths.ensureDirectoryExists(url.deletingLastPathComponent())
+            let fileManager = FileManager.default
+            if let size = (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? UInt64, size > maxBytes {
+                try? fileManager.removeItem(at: url)
+            }
+            if !fileManager.fileExists(atPath: url.path) {
+                fileManager.createFile(atPath: url.path, contents: nil)
+            }
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss.SSS"
+            try handle.write(contentsOf: Data("\(formatter.string(from: Date())) \(line)\n".utf8))
+        } catch {
+            // best effort
+        }
+    }
+}

@@ -47,7 +47,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         var lastPrimaryCenterX = viewModel.layout.primaryCenterX
         viewModel.layoutDidChange
-            .receive(on: RunLoop.main)
             .sink { [weak self] newLayout in
                 guard let self else { return }
                 // Keep the primary pet where it is on screen while the row grows or shrinks around it.

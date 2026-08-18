@@ -5,8 +5,6 @@ import SwiftUI
 struct PetView: View {
     @ObservedObject var model: PetViewModel
 
-    private static let speechBubbleMaxWidth: CGFloat = 210
-
     var body: some View {
         let layout = model.layout
         let cardHeight = layout.primarySpriteSize.height + RowLayout.sessionBadgeReservedHeight + 4
@@ -24,14 +22,15 @@ struct PetView: View {
                 .position(x: bubbleCenterX(in: layout), y: RowLayout.speechBubbleReservedHeight / 2)
         }
         .frame(width: layout.contentSize.width, height: layout.contentSize.height)
-        .animation(.spring(duration: 0.28), value: layout)
+        // No implicit animation on layout changes: the panel is moved so the primary pet stays put on
+        // screen, and animating card positions on top of that would make it visibly jump and slide.
     }
 
     private func bubbleWidth(in layout: RowLayout) -> CGFloat {
-        min(Self.speechBubbleMaxWidth, layout.contentSize.width - 8)
+        min(RowLayout.speechBubbleMaxWidth, layout.contentSize.width - 8)
     }
 
-    /// Centre the bubble over the primary pet, but keep it inside the panel.
+    /// Centre the bubble over the primary pet (RowLayout reserves the room), clamped as a safety net.
     private func bubbleCenterX(in layout: RowLayout) -> CGFloat {
         let half = bubbleWidth(in: layout) / 2
         return min(max(layout.primaryCenterX, half + 4), layout.contentSize.width - half - 4)
@@ -58,6 +57,8 @@ struct SessionCardView: View {
     let card: RowLayout.Card
     let cardHeight: CGFloat
 
+    @State private var hasAppeared = false
+
     private var spriteSize: CGSize {
         let grid = model.pet.gridSize
         return CGSize(width: CGFloat(grid.width) * card.pixelScale, height: CGFloat(grid.height) * card.pixelScale)
@@ -83,7 +84,11 @@ struct SessionCardView: View {
             }
         }
         .frame(height: cardHeight, alignment: .bottom)
-        .opacity(card.isPrimary ? 1 : 0.92)
+        .opacity(card.isPrimary ? 1 : (hasAppeared ? 0.92 : 0))
+        .onAppear {
+            if card.isPrimary { hasAppeared = true; return }
+            withAnimation(.easeOut(duration: 0.18)) { hasAppeared = true }
+        }
     }
 
     @ViewBuilder

@@ -239,26 +239,36 @@ final class PetViewModel: ObservableObject {
 
     /// A click at `contentX` (points from the panel's left edge).
     func handleClick(atContentX contentX: CGFloat) {
+        let cardsDescription = layout.cards.map { "\($0.label)[\(Int($0.x))-\(Int($0.x + $0.width))]\($0.isPrimary ? "*" : "")" }.joined(separator: " ")
+        func log(_ action: String) {
+            OverlayLog.append("click x=\(Int(contentX)) width=\(Int(layout.contentSize.width)) sessions=\(sessions.count) expanded=\(isExpanded) cards: \(cardsDescription) -> \(action)")
+        }
         guard sessions.count >= 2 else {
+            log("pet")
             petWasClicked()
             return
         }
         if !isExpanded {
+            log("expand")
             isFannedOut = true
             relayoutIfNeeded()
             return
         }
         guard let card = layout.card(atContentX: contentX) else {
+            log("gap → collapse")
             collapse()
             return
         }
         if card.isPrimary {
             if isAlwaysFannedOut {
+                log("primary → pet (always expanded)")
                 petWasClicked() // can't collapse; treat as petting
             } else {
+                log("primary → collapse")
                 collapse()
             }
         } else if let sessionId = card.sessionId {
+            log("pin \(card.label)")
             pin(sessionId: sessionId)
         }
     }
