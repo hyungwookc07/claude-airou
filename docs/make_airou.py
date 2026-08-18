@@ -114,7 +114,7 @@ RIGHT_PAW = (20, 20, 21, 23)
 LEFT_FOOT = (8, 25, 11, 27)
 RIGHT_FOOT = (16, 25, 19, 27)
 EYE_LEFT_X, EYE_RIGHT_X, EYE_Y = 6, 16, 9          # 6x6 eyes
-MASK_TRIANGLE = ((13.5, 3.2), (6.0, 18.4), (21.0, 18.4))   # apex at the forehead, base around the muzzle
+MASK_TRIANGLE = ((13.5, 7.6), (6.0, 18.4), (21.0, 18.4))   # apex between the eyes (not up to the forehead), base around the muzzle
 
 def body_mask():
     m = blank()
