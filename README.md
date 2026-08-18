@@ -15,7 +15,7 @@ creature floats in a corner of your screen and shows what Claude is doing right 
 
 ![states](docs/states.png)
 
-Built-in pets — Mochi (cat) · Quackers (duck) · Boo (ghost) · Jelly (slime) · Bolt (robot) · Inky (octopus) · **Clawd** (the little orange creature from the Claude Code welcome screen, `docs/make_clawd.py`) · **Airou** (the namesake: a Felyne-style hunting cat, `docs/make_airou.py`):
+Built-in pets — **Airou** (the namesake and default: a Felyne-style hunting cat, `docs/make_airou.py`) · Mochi (cat) · Quackers (duck) · Boo (ghost) · Jelly (slime) · Bolt (robot) · Inky (octopus) · **Clawd** (the little orange creature from the Claude Code welcome screen, `docs/make_clawd.py`):
 
 ![pets](docs/pets.png)
 

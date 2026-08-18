@@ -5,6 +5,7 @@ import Foundation
 enum BuiltInPets {
     /// Order here is the order in the menu.
     static let embeddedJSONFiles: [(fileName: String, bytes: [UInt8])] = [
+        ("airou-felyne.json", PackageResources.airou_felyne_json),   // the namesake comes first (default for new installs)
         ("mochi-cat.json", PackageResources.mochi_cat_json),
         ("quackers-duck.json", PackageResources.quackers_duck_json),
         ("boo-ghost.json", PackageResources.boo_ghost_json),
@@ -12,7 +13,6 @@ enum BuiltInPets {
         ("bolt-robot.json", PackageResources.bolt_robot_json),
         ("inky-octopus.json", PackageResources.inky_octopus_json),
         ("clawd-claude.json", PackageResources.clawd_claude_json),
-        ("airou-felyne.json", PackageResources.airou_felyne_json),
     ]
 
     static func loadAll() -> [PetDefinition] {
