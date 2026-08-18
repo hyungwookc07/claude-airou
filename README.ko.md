@@ -13,7 +13,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 ![states](docs/states.png)
 
-내장 펫 8종 — **Airou**(마스코트: 아이루풍 사냥 고양이, `docs/make_airou.py`) · Mochi(고양이) · Quackers(오리) · Boo(유령) · Jelly(슬라임) · Bolt(로봇) · Inky(문어) · **Clawd**(Claude Code 시작 화면의 그 주황 마스코트, `docs/make_clawd.py`로 생성):
+내장 펫 8종 — Mochi(고양이) · Quackers(오리) · Boo(유령) · Jelly(슬라임) · Bolt(로봇) · Inky(문어) · **Clawd**(Claude Code 시작 화면의 그 주황 마스코트, `docs/make_clawd.py`) · **Airou**(이름의 주인공, 아이루풍 사냥 고양이, `docs/make_airou.py`):
 
 ![pets](docs/pets.png)
 
