@@ -2,7 +2,7 @@
 
 Checked against reference images (Capcom's "Airou from the Monster Hunter" art, the Fuwatama /
 deformed plushes, the MegaHouse figure, the wiki render): cream fur with brown "points" — an
-inverted-triangle mask down the middle of the face, brown ear backs with pink insides, brown
+triangle mask widest around the muzzle and narrowing up between the eyes, brown ear backs with pink insides, brown
 paw / feet tips and tail tuft — big round blue eyes sitting on the mask edges, a small nose over
 an "ω" mouth, whiskers, a chubby body. Palico gear: a leather vest with belt and pouch, and the
 signature paw hammer planted on the ground beside it.
@@ -114,6 +114,7 @@ RIGHT_PAW = (20, 20, 21, 23)
 LEFT_FOOT = (8, 25, 11, 27)
 RIGHT_FOOT = (16, 25, 19, 27)
 EYE_LEFT_X, EYE_RIGHT_X, EYE_Y = 6, 16, 9          # 6x6 eyes
+MASK_TRIANGLE = ((13.5, 3.2), (6.0, 18.4), (21.0, 18.4))   # apex at the forehead, base around the muzzle
 
 def body_mask():
     m = blank()
@@ -157,20 +158,22 @@ def base(tail=0, raised_paw=None, hammer=True):
     triangle(inner, (21.8, 2.6), (24.0, 7.0), (18.4, 5.6))
     paint_inside(g, inner, "p", only=("t",))
 
-    # brown face mask: inverted triangle from between the ears to the muzzle
-    mask = blank(); triangle(mask, (6.5, 3.4), (20.5, 3.4), (13.5, 17.6))
+    # brown face mask: a triangle that is widest around the muzzle and narrows up to the forehead
+    mask = blank(); triangle(mask, *MASK_TRIANGLE)
     paint_inside(g, mask, "t")
 
     # eyes on the mask edges
     eye(g, EYE_LEFT_X, EYE_Y); eye(g, EYE_RIGHT_X, EYE_Y)
 
-    # nose (pink) at the mask tip, "ω" mouth on the cream muzzle
-    put(g, 13, 15, "p"); put(g, 14, 15, "p"); put(g, 13, 16, "p"); put(g, 14, 16, "p")
-    for (x, y) in ((11, 17), (13, 17), (15, 17), (12, 18), (14, 18)):
+    # nose (pink) and "ω" mouth inside the brown muzzle
+    put(g, 13, 14, "p"); put(g, 14, 14, "p"); put(g, 13, 15, "p"); put(g, 14, 15, "p")
+    for (x, y) in ((11, 16), (13, 16), (15, 16), (12, 17), (14, 17)):
         put(g, x, y, "k")
 
     # whiskers, two per side, from the cheeks
     for (x, y) in ((1, 12), (2, 12), (1, 14), (2, 14), (25, 12), (26, 12), (25, 14), (26, 14)):
+        put(g, x, y, "k")
+    for (x, y) in ((4, 16), (5, 16), (22, 16), (23, 16)):
         put(g, x, y, "k")
 
     # leather vest with belt and a hip pouch (Palico gear)
@@ -256,12 +259,12 @@ def clear_eyes(g):
                     # restore fur/mask behind: mask triangle decides
                     g[y][x] = "t" if in_mask(x, y) else "c"
 
-_MASK = blank(); triangle(_MASK, (6.5, 3.4), (20.5, 3.4), (13.5, 17.6))
+_MASK = blank(); triangle(_MASK, *MASK_TRIANGLE)
 def in_mask(x, y):
     return _MASK[y][x]
 
 def clear_mouth(g):
-    for (x, y) in ((11, 17), (13, 17), (15, 17), (12, 18), (14, 18)):
+    for (x, y) in ((11, 16), (13, 16), (15, 16), (12, 17), (14, 17)):
         put(g, x, y, "t" if in_mask(x, y) else "c")
 
 def rows(g):
@@ -314,7 +317,7 @@ def waiting(shift):
             for y in range(EYE_Y + 2, EYE_Y + 5):
                 put(g, x, y, "e")           # dilated pupil
         put(g, x0 + 1, EYE_Y + 1, "w"); put(g, x0 + 2, EYE_Y + 1, "w")
-    put(g, 13, 17, "e"); put(g, 14, 17, "e"); put(g, 13, 18, "e"); put(g, 14, 18, "e")
+    put(g, 13, 16, "e"); put(g, 14, 16, "e"); put(g, 13, 17, "e"); put(g, 14, 17, "e")
     for y in range(0 + shift, 4 + shift):
         put(g, 26, y, "r"); put(g, 27, y, "r")
     put(g, 26, 5 + shift, "r"); put(g, 27, 5 + shift, "r")
@@ -345,9 +348,9 @@ def done(alt):
         put(g, x0 + 2, EYE_Y + 2, "e"); put(g, x0 + 3, EYE_Y + 2, "e")
         put(g, x0 + 1, EYE_Y + 3, "e"); put(g, x0 + 4, EYE_Y + 3, "e")
         put(g, x0, EYE_Y + 4, "e"); put(g, x0 + 5, EYE_Y + 4, "e")
-    put(g, 11, 17, "k"); put(g, 16, 17, "k")
+    put(g, 11, 16, "k"); put(g, 16, 16, "k")
     for x in range(12, 16):
-        put(g, x, 18, "k")
+        put(g, x, 17, "k")
     for (x, y) in ([(1, 10), (26, 9), (2, 18)] if not alt else [(0, 13), (27, 7), (1, 16)]):
         put(g, x, y, "y")
     return g
@@ -359,9 +362,9 @@ def error(drop_dy):
     for x0 in (EYE_LEFT_X, EYE_RIGHT_X):
         for d in range(6):
             put(g, x0 + d, EYE_Y + d, "e"); put(g, x0 + 5 - d, EYE_Y + d, "e")
-    put(g, 11, 18, "k"); put(g, 16, 18, "k")
+    put(g, 11, 17, "k"); put(g, 16, 17, "k")
     for x in range(12, 16):
-        put(g, x, 17, "k")
+        put(g, x, 16, "k")
     put(g, 26, 10 + drop_dy, "b"); put(g, 26, 11 + drop_dy, "b")
     return g
 frames["error"] = [rows(error(0)), rows(error(2))]
