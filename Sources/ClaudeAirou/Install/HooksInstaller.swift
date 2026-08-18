@@ -176,7 +176,15 @@ struct HooksInstaller {
         guard handler["type"] as? String == "command",
               let command = handler["command"] as? String else { return false }
         let trimmed = command.trimmingCharacters(in: .whitespaces)
-        guard containsOurMarker(trimmed) else { return false }
+        if !containsOurMarker(trimmed) {
+            // Renamed/symlinked binary: same file, different name.
+            let words = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard words.count >= 2, words.last == hookSubcommand else { return false }
+            let firstWord = words[0].trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            let resolved = URL(fileURLWithPath: firstWord).resolvingSymlinksInPath().standardizedFileURL.path
+            let ours = URL(fileURLWithPath: currentExecutablePath()).resolvingSymlinksInPath().standardizedFileURL.path
+            return resolved == ours
+        }
         if trimmed.hasSuffix(" " + hookSubcommand) { return true }
         if let args = handler["args"] as? [String], args == [hookSubcommand] {
             let markers = [commandMarker] + legacyCommandMarkers

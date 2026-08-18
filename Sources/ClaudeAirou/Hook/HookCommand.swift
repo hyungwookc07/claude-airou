@@ -62,8 +62,9 @@ enum HookCommand {
     private static func refreshUsageEstimateIfRelevant(input: HookInput, stateStore: SessionStateStore) {
         guard TranscriptContextEstimator.refreshingEventNames.contains(input.hookEventName),
               !input.isSubagentEvent,
-              let transcriptPath = input.transcriptPath,
-              let estimate = TranscriptContextEstimator.estimate(transcriptPath: transcriptPath, sessionId: input.sessionId) else { return }
+              let transcriptPath = input.transcriptPath else { return }
+        let known = stateStore.readUsage(sessionId: input.sessionId)?.contextWindowSize
+        guard let estimate = TranscriptContextEstimator.estimate(transcriptPath: transcriptPath, sessionId: input.sessionId, knownWindowSize: known) else { return }
         try? stateStore.mergeUsage(estimate)
     }
 

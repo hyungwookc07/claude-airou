@@ -45,12 +45,16 @@ struct SessionStateStore {
         try data.write(to: usageFileURL(forSessionId: usage.sessionId), options: .atomic)
     }
 
-    /// Writes `candidate` unless a fresher, more authoritative reading is already on disk.
+    /// Merges `candidate` into what is on disk (status-line readings stay authoritative for a while;
+    /// transcript estimates keep the status line's window, rate limits and cost).
     func mergeUsage(_ candidate: SessionUsageSnapshot) throws {
-        if let existing = readUsage(sessionId: candidate.sessionId), !existing.shouldBeReplaced(by: candidate) {
+        guard let existing = readUsage(sessionId: candidate.sessionId) else {
+            try writeUsage(candidate)
             return
         }
-        try writeUsage(candidate)
+        if let merged = existing.merged(with: candidate) {
+            try writeUsage(merged)
+        }
     }
 
     func readUsage(sessionId: String) -> SessionUsageSnapshot? {
@@ -123,6 +127,9 @@ struct SessionStateStore {
     func removeAll() {
         for snapshot in loadAll() {
             remove(sessionId: snapshot.sessionId)
+        }
+        for sessionId in loadAllUsage().keys {
+            remove(sessionId: sessionId)
         }
     }
 

@@ -11,7 +11,10 @@ enum TranscriptContextEstimator {
     /// Hook events after which the transcript may have a fresh assistant message.
     static let refreshingEventNames: Set<String> = ["UserPromptSubmit", "PostToolUse", "PostToolBatch", "Stop", "SessionStart", "PostCompact"]
 
-    static func estimate(transcriptPath: String, sessionId: String, now: Date = Date()) -> SessionUsageSnapshot? {
+    /// - Parameter knownWindowSize: a window size already established for this session (from the
+    ///   status line or an earlier estimate); never estimate below it, so a compaction that drops the
+    ///   context under 200k does not flip a 1M-window session back to the small tier.
+    static func estimate(transcriptPath: String, sessionId: String, knownWindowSize: Int? = nil, now: Date = Date()) -> SessionUsageSnapshot? {
         guard let handle = FileHandle(forReadingAtPath: transcriptPath) else { return nil }
         defer { try? handle.close() }
         guard let fileSize = try? handle.seekToEnd() else { return nil }
@@ -23,6 +26,7 @@ enum TranscriptContextEstimator {
         for line in lines.reversed() {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   object["type"] as? String == "assistant",
+                  (object["isSidechain"] as? Bool) != true, // subagent turns live in the same file
                   let message = object["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any] else { continue }
             func count(_ key: String) -> Int {
@@ -33,7 +37,7 @@ enum TranscriptContextEstimator {
             let contextTokens = count("input_tokens") + count("cache_creation_input_tokens") + count("cache_read_input_tokens")
             guard contextTokens > 0 else { continue }
             let model = (message["model"] as? String) ?? ""
-            let windowSize = contextWindowSize(forModel: model, observedContextTokens: contextTokens)
+            let windowSize = max(knownWindowSize ?? 0, contextWindowSize(forModel: model, observedContextTokens: contextTokens))
             var snapshot = SessionUsageSnapshot(sessionId: sessionId, source: .transcript, updatedAtEpochSeconds: now.timeIntervalSince1970)
             snapshot.contextTokens = contextTokens
             snapshot.contextWindowSize = windowSize

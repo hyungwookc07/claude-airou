@@ -5,10 +5,24 @@ import Foundation
 /// battery gauge, then runs whatever status line the user had before, with the same stdin, so the
 /// terminal status line looks exactly as it did.
 enum StatusLineCommand {
+    /// Set in the passthrough's environment; if we ever see it on our own stdin path we are being
+    /// invoked by ourselves and must not spawn again.
+    static let recursionGuardEnvironmentKey = "CLAUDE_AIROU_STATUSLINE_DEPTH"
+
     /// The user's original `statusLine` object from settings.json, kept here while ours is installed.
-    static var passthroughFile: URL { AppPaths.rootDirectory.appendingPathComponent("statusline-passthrough.json") }
+    /// One file per settings file, so `--settings` targets don't clobber each other.
+    static func passthroughFile(forSettingsPath settingsPath: String?) -> URL {
+        let root = AppPaths.rootDirectory
+        guard let settingsPath, settingsPath != AppPaths.claudeSettingsFile.path else {
+            return root.appendingPathComponent("statusline-passthrough.json")
+        }
+        let digest = String(settingsPath.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }, radix: 36)
+        return root.appendingPathComponent("statusline-passthrough-\(digest).json")
+    }
 
     static func run(arguments: [String], stateStore: SessionStateStore = SessionStateStore()) -> Int32 {
+        signal(SIGPIPE, SIG_IGN) // a passthrough that exits before draining stdin must not kill us
+
         if isatty(FileHandle.standardInput.fileDescriptor) != 0 {
             StandardError.print("claude-airou statusline: expects the Claude Code status line JSON on stdin (see `claude-airou install-statusline`).")
             return 0
@@ -17,16 +31,34 @@ enum StatusLineCommand {
 
         if let object = try? JSONSerialization.jsonObject(with: inputData) as? [String: Any],
            let usage = parseUsage(object) {
-            try? stateStore.writeUsage(usage)
+            try? stateStore.mergeUsage(usage)
         }
 
-        return runPassthrough(inputData: inputData, explicitCommand: explicitThenCommand(arguments))
+        let options = parseOptions(arguments)
+        return runPassthrough(inputData: inputData, explicitCommand: options.thenCommand, settingsPath: options.settingsPath)
     }
 
-    /// `--then CMD` overrides the stored passthrough (handy for testing).
-    private static func explicitThenCommand(_ arguments: [String]) -> String? {
-        guard let index = arguments.firstIndex(of: "--then"), index + 1 < arguments.count else { return nil }
-        return arguments[index + 1]
+    struct Options {
+        var thenCommand: String?
+        var settingsPath: String?
+    }
+
+    /// `--then CMD` / `--then=CMD` (testing) and `--settings PATH` / `--settings=PATH` (which passthrough file).
+    static func parseOptions(_ arguments: [String]) -> Options {
+        var options = Options()
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            func value(after name: String) -> String? {
+                if argument == name, index + 1 < arguments.count { index += 1; return arguments[index] }
+                if argument.hasPrefix(name + "=") { return String(argument.dropFirst(name.count + 1)) }
+                return nil
+            }
+            if let then = value(after: "--then") { options.thenCommand = then }
+            else if let settings = value(after: "--settings") { options.settingsPath = (settings as NSString).expandingTildeInPath }
+            index += 1
+        }
+        return options
     }
 
     // MARK: - Parsing
@@ -93,40 +125,78 @@ enum StatusLineCommand {
 
     // MARK: - Passthrough
 
+    /// True when `command` is one of our own status line commands (would recurse forever).
+    static func isSelfInvocation(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard HooksInstaller.containsOurMarker(trimmed) else { return false }
+        return trimmed.hasSuffix(" statusline") || trimmed.contains(" statusline ")
+    }
+
     /// Runs the user's own status line command with the same stdin and forwards its output; returns its exit code.
-    private static func runPassthrough(inputData: Data, explicitCommand: String?) -> Int32 {
-        let command = explicitCommand ?? storedPassthroughCommand()
+    private static func runPassthrough(inputData: Data, explicitCommand: String?, settingsPath: String?) -> Int32 {
+        if ProcessInfo.processInfo.environment[recursionGuardEnvironmentKey] != nil {
+            StandardError.print("claude-airou statusline: refusing to run nested (recursion guard).")
+            return 0
+        }
+        let command = explicitCommand ?? storedPassthroughCommand(settingsPath: settingsPath)
         guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else {
             return 0 // no original status line: print nothing
         }
+        if isSelfInvocation(command) {
+            StandardError.print("claude-airou statusline: stored passthrough is claude-airou itself; not running it. Run `claude-airou uninstall-statusline` then `install-statusline` to repair.")
+            return 0
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
+        var environment = ProcessInfo.processInfo.environment
+        environment[recursionGuardEnvironmentKey] = "1"
+        process.environment = environment
         let stdinPipe = Pipe()
         process.standardInput = stdinPipe
         process.standardOutput = FileHandle.standardOutput
         process.standardError = FileHandle.standardError
+
+        // Relay termination: if Claude Code cancels us, take the child down too.
+        signal(SIGTERM, SIG_IGN)
+        let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        terminationSource.setEventHandler {
+            if process.isRunning { process.terminate() }
+        }
+        terminationSource.resume()
+        defer { terminationSource.cancel() }
+
         do {
             try process.run()
         } catch {
             StandardError.print("claude-airou statusline: could not run passthrough: \(error.localizedDescription)")
             return 0
         }
-        stdinPipe.fileHandleForWriting.write(inputData)
+        // The child may exit without reading stdin (SIGPIPE is ignored above; the write then just fails).
+        try? stdinPipe.fileHandleForWriting.write(contentsOf: inputData)
         try? stdinPipe.fileHandleForWriting.close()
         process.waitUntilExit()
         return process.terminationStatus
     }
 
-    static func storedPassthroughCommand() -> String? {
-        guard let object = storedPassthroughObject() else { return nil }
+    static func storedPassthroughCommand(settingsPath: String?) -> String? {
+        guard let object = storedPassthroughObject(settingsPath: settingsPath) else { return nil }
         guard (object["type"] as? String ?? "command") == "command" else { return nil }
         return object["command"] as? String
     }
 
-    static func storedPassthroughObject() -> [String: Any]? {
-        guard let data = try? Data(contentsOf: passthroughFile),
+    static func storedPassthroughObject(settingsPath: String?) -> [String: Any]? {
+        let url = passthroughFile(forSettingsPath: settingsPath)
+        guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return object
+    }
+
+    /// True when a passthrough file exists but cannot be read as a JSON object.
+    static func passthroughFileIsCorrupt(settingsPath: String?) -> Bool {
+        let url = passthroughFile(forSettingsPath: settingsPath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        return storedPassthroughObject(settingsPath: settingsPath) == nil
     }
 }

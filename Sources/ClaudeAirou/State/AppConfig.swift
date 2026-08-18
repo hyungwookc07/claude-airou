@@ -37,7 +37,8 @@ struct AppConfig: Codable, Equatable {
         isClickThrough = try container.decodeIfPresent(Bool.self, forKey: .isClickThrough) ?? false
         isPetHidden = try container.decodeIfPresent(Bool.self, forKey: .isPetHidden) ?? false
         isSessionsAlwaysExpanded = try container.decodeIfPresent(Bool.self, forKey: .isSessionsAlwaysExpanded) ?? false
-        gaugeMetric = try container.decodeIfPresent(GaugeMetric.self, forKey: .gaugeMetric) ?? .contextRemaining
+        let gaugeMetricRaw = try container.decodeIfPresent(String.self, forKey: .gaugeMetric)
+        gaugeMetric = gaugeMetricRaw.flatMap(GaugeMetric.init(rawValue:)) ?? .contextRemaining // unknown value → default, keep the rest of the config
     }
 
     static func load(from url: URL = AppPaths.configFile) -> AppConfig {
