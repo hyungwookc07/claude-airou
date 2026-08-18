@@ -6,6 +6,9 @@ use crate::model::{PetState, SessionSnapshot};
 use serde_json::Value;
 
 /// Events the installer registers. Anything else is ignored if it ever arrives.
+// Consumed by `install::run_install_hooks` (still a stub while modules land in parallel);
+// allow(dead_code) keeps the transitional build warning-free without changing the signature.
+#[allow(dead_code)]
 pub const SUBSCRIBED_EVENT_NAMES: [&str; 17] = [
     "SessionStart",
     "SessionEnd",
@@ -108,23 +111,248 @@ pub enum MappingResult {
     Ignore,
 }
 
+fn update(state: PetState, message: impl Into<String>, tool_name: Option<&str>) -> MappingResult {
+    MappingResult::Update {
+        state,
+        message: message.into(),
+        tool_name: tool_name.map(str::to_string),
+    }
+}
+
 /// Port of `HookEventMapper.map(_:)` — every branch, message string and state must match
 /// the Swift original exactly (see the table in README.md).
 pub fn map(input: &HookInput) -> MappingResult {
-    let _ = input;
-    todo!("port HookEventMapper.map from Sources/ClaudeAirou/Hook/HookEventMapper.swift")
+    match input.hook_event_name() {
+        "SessionStart" => match input.session_start_source() {
+            // Fires mid-turn after compaction; Claude keeps working, so don't greet.
+            Some("compact") => update(PetState::Thinking, "Context compacted, back to work", None),
+            Some("resume") => update(PetState::Hello, "Welcome back!", None),
+            Some("clear") => update(PetState::Hello, "Fresh start!", None),
+            _ => update(PetState::Hello, "Hi! Ready when you are", None),
+        },
+
+        "SessionEnd" => MappingResult::RemoveSession,
+
+        "UserPromptSubmit" => update(PetState::Thinking, "Thinking…", None),
+
+        "PreToolUse" => {
+            if let Some(interaction) = map_user_interaction_tool(input) {
+                return interaction;
+            }
+            let summary = summarize_tool(input.tool_name().unwrap_or("tool"), input.tool_input());
+            update(PetState::Working, summary, input.tool_name())
+        }
+
+        "PostToolUse" | "PostToolBatch" => update(PetState::Thinking, "Thinking…", input.tool_name()),
+
+        "PostToolUseFailure" => {
+            let name = input.tool_name().unwrap_or("tool");
+            update(PetState::Error, format!("{name} failed — recovering…"), input.tool_name())
+        }
+
+        "PermissionRequest" => {
+            if let Some(interaction) = map_user_interaction_tool(input) {
+                return interaction;
+            }
+            let summary = summarize_tool(input.tool_name().unwrap_or("tool"), input.tool_input());
+            update(PetState::WaitingApproval, format!("Approve? {summary}"), input.tool_name())
+        }
+
+        "Notification" => map_notification(input),
+
+        "Stop" => update(PetState::Done, "Done!", None),
+
+        "StopFailure" => {
+            let detail = input
+                .error_type()
+                .map(|t| t.replace('_', " "))
+                .unwrap_or_else(|| "API error".to_string());
+            update(PetState::Error, format!("Stopped: {detail}"), None)
+        }
+
+        "SubagentStart" => {
+            let agent = input.agent_type().unwrap_or("sub");
+            update(PetState::Working, format!("Sent a {agent} agent to work"), Some("Agent"))
+        }
+
+        "SubagentStop" => update(PetState::Thinking, "Agent reported back", Some("Agent")),
+
+        "PreCompact" => {
+            let trigger = if input.compact_trigger() == Some("auto") { "Auto-compacting" } else { "Compacting" };
+            update(PetState::Thinking, format!("{trigger} context…"), None)
+        }
+
+        "PostCompact" => update(PetState::Thinking, "Context compacted", None),
+
+        "Elicitation" => {
+            // Elicitation input carries mcp_server_name + message (no tool_name).
+            let text = input.notification_message().unwrap_or("").trim();
+            let server = input
+                .mcp_server_name()
+                .map(|s| format!(" ({s})"))
+                .unwrap_or_default();
+            let message = if text.is_empty() {
+                format!("A tool needs your input{server}")
+            } else {
+                truncate(text)
+            };
+            update(PetState::NeedsInput, message, input.mcp_server_name())
+        }
+
+        "ElicitationResult" => match input.elicitation_action() {
+            Some("decline") | Some("cancel") => {
+                update(PetState::Thinking, "Okay, skipping that", input.mcp_server_name())
+            }
+            _ => update(PetState::Working, "Thanks! Continuing…", input.mcp_server_name()),
+        },
+
+        _ => MappingResult::Ignore,
+    }
 }
+
+/// Tools that block on the user are "needs input", not "working"/"approve?".
+fn map_user_interaction_tool(input: &HookInput) -> Option<MappingResult> {
+    match input.tool_name() {
+        Some("AskUserQuestion") => Some(update(PetState::NeedsInput, "Asking you a question", input.tool_name())),
+        Some("ExitPlanMode") => Some(update(PetState::NeedsInput, "Waiting for plan approval", input.tool_name())),
+        _ => None,
+    }
+}
+
+fn map_notification(input: &HookInput) -> MappingResult {
+    let text = input.notification_message().unwrap_or("").trim();
+    match input.notification_type() {
+        Some("permission_prompt") => {
+            let message = if text.is_empty() { "Needs your approval".to_string() } else { truncate(text) };
+            update(PetState::WaitingApproval, message, input.tool_name())
+        }
+        // "Claude finished ~60 s ago and you haven't typed": the session is simply idle at the
+        // prompt. Writing idle also clears a stuck busy state after an interrupt (Stop does not fire then).
+        Some("idle_prompt") => update(PetState::Idle, "", None),
+        Some("agent_needs_input") => {
+            let message = if text.is_empty() { "Needs your input".to_string() } else { truncate(text) };
+            update(PetState::NeedsInput, message, None)
+        }
+        Some("elicitation_dialog") | Some("elicitation_url_dialog") => {
+            let message = if text.is_empty() { "A tool needs your input".to_string() } else { truncate(text) };
+            update(PetState::NeedsInput, message, None)
+        }
+        Some("agent_completed") => {
+            let message = if text.is_empty() { "Done!".to_string() } else { truncate(text) };
+            update(PetState::Done, message, None)
+        }
+        Some("auth_success") | Some("elicitation_complete") | Some("elicitation_response") => MappingResult::Ignore,
+        _ => MappingResult::Ignore,
+    }
+}
+
+/// Two full bubble lines (~300pt wide) hold roughly this much; longer text gets an ellipsis.
+const MAX_CHARACTERS: usize = 100;
 
 /// Port of `ToolSummarizer.summarize` — one bubble line per tool call.
 pub fn summarize_tool(tool_name: &str, tool_input: &Value) -> String {
-    let _ = (tool_name, tool_input);
-    todo!("port ToolSummarizer.summarize")
+    let last_path_component = |key: &str| -> Option<String> {
+        let path = tool_input.get(key)?.as_str()?;
+        if path.is_empty() {
+            return None;
+        }
+        Some(
+            std::path::Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string()),
+        )
+    };
+    let value = |key: &str| -> Option<String> {
+        let text = tool_input.get(key)?.as_str()?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
+    let line: String = match tool_name {
+        "Read" => format!("Reading {}", last_path_component("file_path").unwrap_or_else(|| "a file".into())),
+        "Edit" | "MultiEdit" => {
+            format!("Editing {}", last_path_component("file_path").unwrap_or_else(|| "a file".into()))
+        }
+        "Write" => format!("Writing {}", last_path_component("file_path").unwrap_or_else(|| "a file".into())),
+        "NotebookEdit" => {
+            format!("Editing {}", last_path_component("notebook_path").unwrap_or_else(|| "a notebook".into()))
+        }
+        "Bash" => {
+            let description = value("description");
+            let command = value("command").map(|c| c.replace('\n', " "));
+            format!("Running: {}", description.or(command).unwrap_or_else(|| "a command".into()))
+        }
+        "Grep" => format!("Searching for “{}”", value("pattern").unwrap_or_else(|| "…".into())),
+        "Glob" => format!("Looking for {}", value("pattern").unwrap_or_else(|| "files".into())),
+        "WebFetch" => match value("url").as_deref().and_then(url_host) {
+            Some(host) => format!("Fetching {host}"),
+            None => "Fetching a page".to_string(),
+        },
+        "WebSearch" => format!("Searching the web: {}", value("query").unwrap_or_else(|| "…".into())),
+        "Agent" | "Task" => format!("Delegating: {}", value("description").unwrap_or_else(|| "a subtask".into())),
+        "TodoWrite" | "TaskCreate" | "TaskUpdate" => "Updating the task list".to_string(),
+        "AskUserQuestion" => "Asking you a question".to_string(),
+        "ExitPlanMode" => "Waiting for plan approval".to_string(),
+        "Skill" => format!("Using skill {}", value("skill").unwrap_or_default()),
+        _ => {
+            if tool_name.starts_with("mcp__") {
+                let readable = tool_name
+                    .split('_')
+                    .filter(|part| !part.is_empty())
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if readable.is_empty() {
+                    "Using an MCP tool".to_string()
+                } else {
+                    format!("Using {readable}")
+                }
+            } else {
+                format!("Using {tool_name}")
+            }
+        }
+    };
+    truncate(&line)
+}
+
+/// Extracts the host from a URL string without external crates: the authority part sits
+/// between `://` and the next `/`, `?` or `#`; strip userinfo (before the last `@`) and the
+/// port (after `:`, unless the host is a bracketed IPv6 literal). Mirrors Swift's
+/// `URL(string:)?.host` for the URLs the WebFetch tool actually sees.
+fn url_host(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://")?.1;
+    let authority_end = after_scheme
+        .find(|c| c == '/' || c == '?' || c == '#')
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    // Strip userinfo — everything before the last '@'.
+    let host_port = authority.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(authority);
+    // Bracketed IPv6 literal: host is the part inside the brackets.
+    let host = if let Some(inner) = host_port.strip_prefix('[') {
+        inner.split_once(']').map(|(h, _)| h).unwrap_or(inner)
+    } else {
+        host_port.split_once(':').map(|(h, _)| h).unwrap_or(host_port)
+    };
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Port of `ToolSummarizer.truncate` (100 chars max, ellipsis).
 pub fn truncate(text: &str) -> String {
-    let _ = text;
-    todo!("port ToolSummarizer.truncate")
+    if text.chars().count() <= MAX_CHARACTERS {
+        return text.to_string();
+    }
+    let mut truncated: String = text.chars().take(MAX_CHARACTERS - 1).collect();
+    truncated.push('…');
+    truncated
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,6 +372,715 @@ pub fn resolve(
     tool_name: Option<&str>,
     now_secs: f64,
 ) -> Resolution {
-    let _ = (existing, input, mapped_state, message, tool_name, now_secs);
-    todo!("port HookMergePolicy.resolve from Sources/ClaudeAirou/Hook/HookMergePolicy.swift")
+    let existing_state = existing.map(SessionSnapshot::effective_state).unwrap_or(PetState::Idle);
+    let user_is_blocked = existing_state.is_attention_needed();
+
+    if user_is_blocked {
+        if let Some(existing) = existing {
+            // Subagents keep running while the main thread waits on the user; ignore their chatter.
+            if input.is_subagent_event() {
+                return Resolution::Keep(format!(
+                    "subagent {} while {}",
+                    input.hook_event_name(),
+                    existing.state.raw()
+                ));
+            }
+            // A sibling tool from the same batch finished — the awaited call is still pending.
+            let is_tool_completion = input.hook_event_name() == "PostToolUse"
+                || input.hook_event_name() == "PostToolUseFailure";
+            if is_tool_completion {
+                if let (Some(pending), Some(finished)) =
+                    (existing.pending_tool_use_id.as_deref(), input.tool_use_id())
+                {
+                    if pending != finished {
+                        return Resolution::Keep(format!(
+                            "sibling tool {finished} finished while waiting on {pending}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut snapshot = SessionSnapshot {
+        session_id: input.session_id().to_string(),
+        cwd: input.cwd(),
+        state: mapped_state,
+        message: message.to_string(),
+        last_event_name: input.hook_event_name().to_string(),
+        tool_name: tool_name.map(str::to_string),
+        updated_at_epoch_seconds: now_secs,
+        pending_tool_use_id: None,
+    };
+    if mapped_state.is_attention_needed() {
+        // PermissionRequest / PreToolUse(AskUserQuestion) carry tool_use_id; a Notification
+        // re-asserting the same wait does not, so inherit the id we already had.
+        snapshot.pending_tool_use_id = input
+            .tool_use_id()
+            .map(str::to_string)
+            .or_else(|| {
+                if user_is_blocked {
+                    existing.and_then(|e| e.pending_tool_use_id.clone())
+                } else {
+                    None
+                }
+            });
+    }
+    Resolution::Write(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::now_epoch_secs;
+    use serde_json::json;
+
+    fn input(raw: Value) -> HookInput {
+        HookInput { raw }
+    }
+
+    fn assert_update(result: MappingResult, state: PetState, message: &str, tool_name: Option<&str>) {
+        assert_eq!(
+            result,
+            MappingResult::Update {
+                state,
+                message: message.to_string(),
+                tool_name: tool_name.map(str::to_string),
+            }
+        );
+    }
+
+    // MARK: mapper events
+
+    #[test]
+    fn session_start_sources() {
+        let default = input(json!({"hook_event_name": "SessionStart"}));
+        assert_update(map(&default), PetState::Hello, "Hi! Ready when you are", None);
+        let startup = input(json!({"hook_event_name": "SessionStart", "source": "startup"}));
+        assert_update(map(&startup), PetState::Hello, "Hi! Ready when you are", None);
+        let compact = input(json!({"hook_event_name": "SessionStart", "source": "compact"}));
+        assert_update(map(&compact), PetState::Thinking, "Context compacted, back to work", None);
+        let resume = input(json!({"hook_event_name": "SessionStart", "source": "resume"}));
+        assert_update(map(&resume), PetState::Hello, "Welcome back!", None);
+        let clear = input(json!({"hook_event_name": "SessionStart", "source": "clear"}));
+        assert_update(map(&clear), PetState::Hello, "Fresh start!", None);
+    }
+
+    #[test]
+    fn session_end_removes() {
+        let end = input(json!({"hook_event_name": "SessionEnd", "reason": "exit"}));
+        assert_eq!(map(&end), MappingResult::RemoveSession);
+    }
+
+    #[test]
+    fn user_prompt_submit_thinks() {
+        let event = input(json!({"hook_event_name": "UserPromptSubmit"}));
+        assert_update(map(&event), PetState::Thinking, "Thinking…", None);
+    }
+
+    #[test]
+    fn pre_tool_use_summarizes() {
+        let event = input(json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/home/me/project/main.rs"}
+        }));
+        assert_update(map(&event), PetState::Working, "Reading main.rs", Some("Read"));
+    }
+
+    #[test]
+    fn pre_tool_use_without_tool_name() {
+        let event = input(json!({"hook_event_name": "PreToolUse"}));
+        assert_update(map(&event), PetState::Working, "Using tool", None);
+    }
+
+    #[test]
+    fn user_interaction_tools_map_to_needs_input() {
+        for event_name in ["PreToolUse", "PermissionRequest"] {
+            let ask = input(json!({"hook_event_name": event_name, "tool_name": "AskUserQuestion"}));
+            assert_update(map(&ask), PetState::NeedsInput, "Asking you a question", Some("AskUserQuestion"));
+            let plan = input(json!({"hook_event_name": event_name, "tool_name": "ExitPlanMode"}));
+            assert_update(map(&plan), PetState::NeedsInput, "Waiting for plan approval", Some("ExitPlanMode"));
+        }
+    }
+
+    #[test]
+    fn post_tool_use_and_batch_think() {
+        let post = input(json!({"hook_event_name": "PostToolUse", "tool_name": "Bash"}));
+        assert_update(map(&post), PetState::Thinking, "Thinking…", Some("Bash"));
+        let batch = input(json!({"hook_event_name": "PostToolBatch"}));
+        assert_update(map(&batch), PetState::Thinking, "Thinking…", None);
+    }
+
+    #[test]
+    fn post_tool_use_failure() {
+        let failure = input(json!({"hook_event_name": "PostToolUseFailure", "tool_name": "Bash"}));
+        assert_update(map(&failure), PetState::Error, "Bash failed — recovering…", Some("Bash"));
+        let anonymous = input(json!({"hook_event_name": "PostToolUseFailure"}));
+        assert_update(map(&anonymous), PetState::Error, "tool failed — recovering…", None);
+    }
+
+    #[test]
+    fn permission_request_asks_for_approval() {
+        let event = input(json!({
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf build"}
+        }));
+        assert_update(
+            map(&event),
+            PetState::WaitingApproval,
+            "Approve? Running: rm -rf build",
+            Some("Bash"),
+        );
+    }
+
+    #[test]
+    fn notification_permission_prompt() {
+        let with_text = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "  Claude needs permission to use Bash  ",
+            "tool_name": "Bash"
+        }));
+        assert_update(
+            map(&with_text),
+            PetState::WaitingApproval,
+            "Claude needs permission to use Bash",
+            Some("Bash"),
+        );
+        let empty = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "   "
+        }));
+        assert_update(map(&empty), PetState::WaitingApproval, "Needs your approval", None);
+    }
+
+    #[test]
+    fn notification_idle_prompt_clears_to_idle() {
+        let event = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "idle_prompt",
+            "message": "Claude is waiting for your input"
+        }));
+        assert_update(map(&event), PetState::Idle, "", None);
+    }
+
+    #[test]
+    fn notification_agent_needs_input() {
+        let event = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "agent_needs_input",
+            "message": ""
+        }));
+        assert_update(map(&event), PetState::NeedsInput, "Needs your input", None);
+        let with_text = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "agent_needs_input",
+            "message": "Pick one"
+        }));
+        assert_update(map(&with_text), PetState::NeedsInput, "Pick one", None);
+    }
+
+    #[test]
+    fn notification_elicitation_dialogs() {
+        for kind in ["elicitation_dialog", "elicitation_url_dialog"] {
+            let event = input(json!({
+                "hook_event_name": "Notification",
+                "notification_type": kind
+            }));
+            assert_update(map(&event), PetState::NeedsInput, "A tool needs your input", None);
+        }
+    }
+
+    #[test]
+    fn notification_agent_completed() {
+        let event = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "agent_completed"
+        }));
+        assert_update(map(&event), PetState::Done, "Done!", None);
+        let with_text = input(json!({
+            "hook_event_name": "Notification",
+            "notification_type": "agent_completed",
+            "message": "All tasks finished"
+        }));
+        assert_update(map(&with_text), PetState::Done, "All tasks finished", None);
+    }
+
+    #[test]
+    fn notification_ignored_types() {
+        for kind in ["auth_success", "elicitation_complete", "elicitation_response", "something_new"] {
+            let event = input(json!({
+                "hook_event_name": "Notification",
+                "notification_type": kind,
+                "message": "text"
+            }));
+            assert_eq!(map(&event), MappingResult::Ignore, "type {kind} should be ignored");
+        }
+        let untyped = input(json!({"hook_event_name": "Notification", "message": "text"}));
+        assert_eq!(map(&untyped), MappingResult::Ignore);
+    }
+
+    #[test]
+    fn stop_is_done() {
+        let event = input(json!({"hook_event_name": "Stop"}));
+        assert_update(map(&event), PetState::Done, "Done!", None);
+    }
+
+    #[test]
+    fn stop_failure_replaces_underscores() {
+        let typed = input(json!({"hook_event_name": "StopFailure", "error_type": "rate_limit_exceeded"}));
+        assert_update(map(&typed), PetState::Error, "Stopped: rate limit exceeded", None);
+        let untyped = input(json!({"hook_event_name": "StopFailure"}));
+        assert_update(map(&untyped), PetState::Error, "Stopped: API error", None);
+    }
+
+    #[test]
+    fn subagent_start_and_stop() {
+        let start = input(json!({"hook_event_name": "SubagentStart", "agent_type": "explore"}));
+        assert_update(map(&start), PetState::Working, "Sent a explore agent to work", Some("Agent"));
+        let anonymous = input(json!({"hook_event_name": "SubagentStart"}));
+        assert_update(map(&anonymous), PetState::Working, "Sent a sub agent to work", Some("Agent"));
+        let stop = input(json!({"hook_event_name": "SubagentStop"}));
+        assert_update(map(&stop), PetState::Thinking, "Agent reported back", Some("Agent"));
+    }
+
+    #[test]
+    fn compaction_events() {
+        let auto = input(json!({"hook_event_name": "PreCompact", "trigger": "auto"}));
+        assert_update(map(&auto), PetState::Thinking, "Auto-compacting context…", None);
+        let manual = input(json!({"hook_event_name": "PreCompact", "trigger": "manual"}));
+        assert_update(map(&manual), PetState::Thinking, "Compacting context…", None);
+        let untriggered = input(json!({"hook_event_name": "PreCompact"}));
+        assert_update(map(&untriggered), PetState::Thinking, "Compacting context…", None);
+        let post = input(json!({"hook_event_name": "PostCompact"}));
+        assert_update(map(&post), PetState::Thinking, "Context compacted", None);
+    }
+
+    #[test]
+    fn elicitation_with_and_without_message() {
+        let with_text = input(json!({
+            "hook_event_name": "Elicitation",
+            "mcp_server_name": "github",
+            "message": "  Enter your token  "
+        }));
+        assert_update(map(&with_text), PetState::NeedsInput, "Enter your token", Some("github"));
+        let empty_with_server = input(json!({
+            "hook_event_name": "Elicitation",
+            "mcp_server_name": "github",
+            "message": "   "
+        }));
+        assert_update(
+            map(&empty_with_server),
+            PetState::NeedsInput,
+            "A tool needs your input (github)",
+            Some("github"),
+        );
+        let bare = input(json!({"hook_event_name": "Elicitation"}));
+        assert_update(map(&bare), PetState::NeedsInput, "A tool needs your input", None);
+    }
+
+    #[test]
+    fn elicitation_result_actions() {
+        for action in ["decline", "cancel"] {
+            let event = input(json!({
+                "hook_event_name": "ElicitationResult",
+                "action": action,
+                "mcp_server_name": "github"
+            }));
+            assert_update(map(&event), PetState::Thinking, "Okay, skipping that", Some("github"));
+        }
+        let accept = input(json!({"hook_event_name": "ElicitationResult", "action": "accept"}));
+        assert_update(map(&accept), PetState::Working, "Thanks! Continuing…", None);
+        let missing = input(json!({"hook_event_name": "ElicitationResult"}));
+        assert_update(map(&missing), PetState::Working, "Thanks! Continuing…", None);
+    }
+
+    #[test]
+    fn unknown_events_are_ignored() {
+        let unknown = input(json!({"hook_event_name": "SomethingNew"}));
+        assert_eq!(map(&unknown), MappingResult::Ignore);
+        let empty = input(json!({}));
+        assert_eq!(map(&empty), MappingResult::Ignore);
+    }
+
+    // MARK: summarizer
+
+    #[test]
+    fn summarize_file_tools() {
+        assert_eq!(summarize_tool("Read", &json!({"file_path": "/a/b/main.swift"})), "Reading main.swift");
+        assert_eq!(summarize_tool("Read", &json!({})), "Reading a file");
+        assert_eq!(summarize_tool("Read", &json!({"file_path": ""})), "Reading a file");
+        assert_eq!(summarize_tool("Edit", &json!({"file_path": "/x/lib.rs"})), "Editing lib.rs");
+        assert_eq!(summarize_tool("MultiEdit", &json!({"file_path": "/x/lib.rs"})), "Editing lib.rs");
+        assert_eq!(summarize_tool("Write", &json!({"file_path": "notes.md"})), "Writing notes.md");
+        assert_eq!(summarize_tool("Write", &json!({})), "Writing a file");
+        assert_eq!(
+            summarize_tool("NotebookEdit", &json!({"notebook_path": "/n/analysis.ipynb"})),
+            "Editing analysis.ipynb"
+        );
+        assert_eq!(summarize_tool("NotebookEdit", &json!({})), "Editing a notebook");
+    }
+
+    #[test]
+    fn summarize_bash_prefers_description_and_collapses_newlines() {
+        assert_eq!(
+            summarize_tool("Bash", &json!({"description": "Build the app", "command": "make"})),
+            "Running: Build the app"
+        );
+        assert_eq!(
+            summarize_tool("Bash", &json!({"command": "cargo build\ncargo test"})),
+            "Running: cargo build cargo test"
+        );
+        // Blank description falls through to the command.
+        assert_eq!(
+            summarize_tool("Bash", &json!({"description": "   ", "command": "ls"})),
+            "Running: ls"
+        );
+        assert_eq!(summarize_tool("Bash", &json!({})), "Running: a command");
+    }
+
+    #[test]
+    fn summarize_search_tools() {
+        assert_eq!(summarize_tool("Grep", &json!({"pattern": "todo!"})), "Searching for “todo!”");
+        assert_eq!(summarize_tool("Grep", &json!({})), "Searching for “…”");
+        assert_eq!(summarize_tool("Glob", &json!({"pattern": "**/*.rs"})), "Looking for **/*.rs");
+        assert_eq!(summarize_tool("Glob", &json!({})), "Looking for files");
+        assert_eq!(
+            summarize_tool("WebSearch", &json!({"query": "rust url parsing"})),
+            "Searching the web: rust url parsing"
+        );
+        assert_eq!(summarize_tool("WebSearch", &json!({})), "Searching the web: …");
+    }
+
+    #[test]
+    fn summarize_webfetch_extracts_host() {
+        assert_eq!(
+            summarize_tool("WebFetch", &json!({"url": "https://docs.rs/serde/latest"})),
+            "Fetching docs.rs"
+        );
+        assert_eq!(
+            summarize_tool("WebFetch", &json!({"url": "https://example.com:8443/path?q=1"})),
+            "Fetching example.com"
+        );
+        assert_eq!(
+            summarize_tool("WebFetch", &json!({"url": "https://user:pass@example.com/x"})),
+            "Fetching example.com"
+        );
+        assert_eq!(
+            summarize_tool("WebFetch", &json!({"url": "http://[::1]:8080/health"})),
+            "Fetching ::1"
+        );
+        // No scheme / no host → generic line.
+        assert_eq!(summarize_tool("WebFetch", &json!({"url": "example.com/foo"})), "Fetching a page");
+        assert_eq!(summarize_tool("WebFetch", &json!({"url": "https:///nohost"})), "Fetching a page");
+        assert_eq!(summarize_tool("WebFetch", &json!({})), "Fetching a page");
+    }
+
+    #[test]
+    fn summarize_agent_and_task_tools() {
+        assert_eq!(
+            summarize_tool("Agent", &json!({"description": "Port the mapper"})),
+            "Delegating: Port the mapper"
+        );
+        assert_eq!(summarize_tool("Task", &json!({})), "Delegating: a subtask");
+        for tool in ["TodoWrite", "TaskCreate", "TaskUpdate"] {
+            assert_eq!(summarize_tool(tool, &json!({})), "Updating the task list");
+        }
+        assert_eq!(summarize_tool("AskUserQuestion", &json!({})), "Asking you a question");
+        assert_eq!(summarize_tool("ExitPlanMode", &json!({})), "Waiting for plan approval");
+    }
+
+    #[test]
+    fn summarize_skill() {
+        assert_eq!(summarize_tool("Skill", &json!({"skill": "pdf"})), "Using skill pdf");
+        // Swift keeps the trailing space when the skill name is missing.
+        assert_eq!(summarize_tool("Skill", &json!({})), "Using skill ");
+    }
+
+    #[test]
+    fn summarize_mcp_tools_split_readably() {
+        assert_eq!(
+            summarize_tool("mcp__github__create_issue", &json!({})),
+            "Using github create issue"
+        );
+        assert_eq!(summarize_tool("mcp__linear__search", &json!({})), "Using linear search");
+        assert_eq!(summarize_tool("mcp__", &json!({})), "Using an MCP tool");
+        assert_eq!(summarize_tool("SomeNewTool", &json!({})), "Using SomeNewTool");
+    }
+
+    #[test]
+    fn summarize_handles_null_and_non_object_input() {
+        assert_eq!(summarize_tool("Read", &Value::Null), "Reading a file");
+        assert_eq!(summarize_tool("Bash", &json!("not an object")), "Running: a command");
+        assert_eq!(summarize_tool("Read", &json!({"file_path": 42})), "Reading a file");
+    }
+
+    // MARK: truncation
+
+    #[test]
+    fn truncate_keeps_short_text() {
+        assert_eq!(truncate(""), "");
+        let exactly_100: String = "a".repeat(100);
+        assert_eq!(truncate(&exactly_100), exactly_100);
+    }
+
+    #[test]
+    fn truncate_cuts_at_100_chars_with_ellipsis() {
+        let long: String = "a".repeat(101);
+        let result = truncate(&long);
+        assert_eq!(result.chars().count(), 100);
+        assert_eq!(result, format!("{}…", "a".repeat(99)));
+    }
+
+    #[test]
+    fn truncate_counts_chars_not_bytes() {
+        // 100 multibyte chars: many more than 100 bytes but exactly 100 chars → untouched.
+        let hundred_multibyte: String = "é".repeat(100);
+        assert_eq!(truncate(&hundred_multibyte), hundred_multibyte);
+        let over: String = "é".repeat(101);
+        let result = truncate(&over);
+        assert_eq!(result.chars().count(), 100);
+        assert_eq!(result, format!("{}…", "é".repeat(99)));
+    }
+
+    #[test]
+    fn summarize_truncates_long_lines() {
+        let long_pattern = "x".repeat(200);
+        let result = summarize_tool("Grep", &json!({ "pattern": long_pattern }));
+        assert_eq!(result.chars().count(), 100);
+        assert!(result.starts_with("Searching for “"));
+        assert!(result.ends_with('…'));
+    }
+
+    // MARK: merge policy
+
+    fn blocked_snapshot(state: PetState, pending: Option<&str>) -> SessionSnapshot {
+        SessionSnapshot {
+            session_id: "s1".into(),
+            cwd: "/tmp/project".into(),
+            state,
+            message: "Approve?".into(),
+            last_event_name: "PermissionRequest".into(),
+            tool_name: Some("Bash".into()),
+            updated_at_epoch_seconds: now_epoch_secs(),
+            pending_tool_use_id: pending.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn resolve_writes_when_no_existing_snapshot() {
+        let event = input(json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "cwd": "/tmp/project",
+            "tool_name": "Read"
+        }));
+        let now = 1_755_500_000.0;
+        match resolve(None, &event, PetState::Working, "Reading main.rs", Some("Read"), now) {
+            Resolution::Write(snapshot) => {
+                assert_eq!(snapshot.session_id, "s1");
+                assert_eq!(snapshot.cwd, "/tmp/project");
+                assert_eq!(snapshot.state, PetState::Working);
+                assert_eq!(snapshot.message, "Reading main.rs");
+                assert_eq!(snapshot.last_event_name, "PreToolUse");
+                assert_eq!(snapshot.tool_name.as_deref(), Some("Read"));
+                assert_eq!(snapshot.updated_at_epoch_seconds, now);
+                assert_eq!(snapshot.pending_tool_use_id, None);
+            }
+            other => panic!("expected write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_keeps_subagent_chatter_while_blocked() {
+        let existing = blocked_snapshot(PetState::WaitingApproval, Some("toolu_1"));
+        let event = input(json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s1",
+            "agent_id": "agent-123",
+            "tool_use_id": "toolu_other"
+        }));
+        assert_eq!(
+            resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
+            Resolution::Keep("subagent PostToolUse while waiting_approval".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_keeps_sibling_tool_completion_while_blocked() {
+        for event_name in ["PostToolUse", "PostToolUseFailure"] {
+            let existing = blocked_snapshot(PetState::NeedsInput, Some("toolu_pending"));
+            let event = input(json!({
+                "hook_event_name": event_name,
+                "session_id": "s1",
+                "tool_use_id": "toolu_sibling"
+            }));
+            assert_eq!(
+                resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
+                Resolution::Keep(
+                    "sibling tool toolu_sibling finished while waiting on toolu_pending".to_string()
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_writes_when_awaited_tool_finishes() {
+        let existing = blocked_snapshot(PetState::WaitingApproval, Some("toolu_1"));
+        let event = input(json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s1",
+            "tool_use_id": "toolu_1"
+        }));
+        match resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()) {
+            Resolution::Write(snapshot) => {
+                assert_eq!(snapshot.state, PetState::Thinking);
+                // Not attention-needed → no pending id carried.
+                assert_eq!(snapshot.pending_tool_use_id, None);
+            }
+            other => panic!("expected write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_writes_tool_completion_without_ids_while_blocked() {
+        // Blocked, PostToolUse, but either id missing → falls through to write.
+        let existing = blocked_snapshot(PetState::WaitingApproval, None);
+        let event = input(json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s1",
+            "tool_use_id": "toolu_x"
+        }));
+        assert!(matches!(
+            resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
+            Resolution::Write(_)
+        ));
+        let existing_with_pending = blocked_snapshot(PetState::WaitingApproval, Some("toolu_1"));
+        let no_id_event = input(json!({"hook_event_name": "PostToolUse", "session_id": "s1"}));
+        assert!(matches!(
+            resolve(
+                Some(&existing_with_pending),
+                &no_id_event,
+                PetState::Thinking,
+                "Thinking…",
+                None,
+                now_epoch_secs()
+            ),
+            Resolution::Write(_)
+        ));
+    }
+
+    #[test]
+    fn resolve_takes_pending_id_from_input() {
+        let event = input(json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "s1",
+            "tool_use_id": "toolu_9",
+            "tool_name": "Bash"
+        }));
+        match resolve(None, &event, PetState::WaitingApproval, "Approve? Running: ls", Some("Bash"), now_epoch_secs()) {
+            Resolution::Write(snapshot) => {
+                assert_eq!(snapshot.pending_tool_use_id.as_deref(), Some("toolu_9"));
+            }
+            other => panic!("expected write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_inherits_pending_id_when_blocked_notification_reasserts() {
+        let existing = blocked_snapshot(PetState::WaitingApproval, Some("toolu_1"));
+        let event = input(json!({
+            "hook_event_name": "Notification",
+            "session_id": "s1"
+        }));
+        match resolve(
+            Some(&existing),
+            &event,
+            PetState::WaitingApproval,
+            "Needs your approval",
+            None,
+            now_epoch_secs(),
+        ) {
+            Resolution::Write(snapshot) => {
+                assert_eq!(snapshot.pending_tool_use_id.as_deref(), Some("toolu_1"));
+            }
+            other => panic!("expected write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_does_not_inherit_pending_id_when_not_blocked() {
+        let mut existing = blocked_snapshot(PetState::Working, Some("toolu_1"));
+        existing.state = PetState::Working;
+        let event = input(json!({
+            "hook_event_name": "Notification",
+            "session_id": "s1"
+        }));
+        match resolve(
+            Some(&existing),
+            &event,
+            PetState::WaitingApproval,
+            "Needs your approval",
+            None,
+            now_epoch_secs(),
+        ) {
+            Resolution::Write(snapshot) => {
+                assert_eq!(snapshot.pending_tool_use_id, None);
+            }
+            other => panic!("expected write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_uses_effective_state_so_stale_blocks_do_not_keep() {
+        // waiting_approval decays to idle after 20 minutes → subagent events write again.
+        let mut existing = blocked_snapshot(PetState::WaitingApproval, Some("toolu_1"));
+        existing.updated_at_epoch_seconds = now_epoch_secs() - 21.0 * 60.0;
+        let event = input(json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s1",
+            "agent_id": "agent-123",
+            "tool_use_id": "toolu_other"
+        }));
+        assert!(matches!(
+            resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
+            Resolution::Write(_)
+        ));
+    }
+
+    #[test]
+    fn resolve_subagent_writes_when_not_blocked() {
+        let mut existing = blocked_snapshot(PetState::Thinking, None);
+        existing.state = PetState::Thinking;
+        let event = input(json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "agent_id": "agent-123",
+            "tool_name": "Read"
+        }));
+        assert!(matches!(
+            resolve(Some(&existing), &event, PetState::Working, "Reading x", Some("Read"), now_epoch_secs()),
+            Resolution::Write(_)
+        ));
+    }
+
+    #[test]
+    fn hook_input_parse_rejects_non_objects() {
+        assert!(HookInput::parse(b"[1,2,3]").is_none());
+        assert!(HookInput::parse(b"not json").is_none());
+        assert!(HookInput::parse(b"").is_none());
+        assert!(HookInput::parse(b"{}").is_some());
+    }
+
+    #[test]
+    fn hook_input_defaults() {
+        let parsed = HookInput::parse(b"{}").unwrap();
+        assert_eq!(parsed.session_id(), "unknown-session");
+        assert_eq!(parsed.hook_event_name(), "");
+        assert!(!parsed.is_subagent_event());
+        assert!(parsed.tool_input().is_null());
+    }
 }
