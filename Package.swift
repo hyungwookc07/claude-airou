@@ -9,6 +9,7 @@ let package = Package(
             name: "claude-airou",
             path: "Sources/ClaudeAirou",
             resources: [
+                .embedInCode("Resources/pets/airou-felyne.json"),
                 .embedInCode("Resources/pets/mochi-cat.json"),
                 .embedInCode("Resources/pets/quackers-duck.json"),
                 .embedInCode("Resources/pets/boo-ghost.json"),
