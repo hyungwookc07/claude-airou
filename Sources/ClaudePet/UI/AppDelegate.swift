@@ -1,0 +1,326 @@
+import AppKit
+import Combine
+import SwiftUI
+
+/// Wires everything together for `claude-pet run`: config, pet library, view model, overlay panel, menu bar item.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var config = AppConfig.load()
+    private var library = PetLibrary.load()
+    private var viewModel: PetViewModel!
+    private var panel: OverlayPanel!
+    private var statusItem: NSStatusItem!
+    private var cancellables: Set<AnyCancellable> = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        guard let selectedPet = library.resolveSelectedPet(preferredId: config.selectedPetId) else {
+            StandardError.print("claude-pet: no valid pets found (built-ins failed to load). Exiting.")
+            NSApp.terminate(nil)
+            return
+        }
+        for problem in library.loadProblems {
+            StandardError.print("claude-pet: skipping user pet — \(problem)")
+        }
+
+        viewModel = PetViewModel(
+            pet: selectedPet.definition,
+            pixelScale: CGFloat(config.pixelScale),
+            isSpeechBubbleHidden: config.isSpeechBubbleHidden
+        )
+
+        panel = OverlayPanel(contentSize: viewModel.contentSize, rootView: PetView(model: viewModel))
+        panel.onClick = { [weak self] in self?.viewModel.petWasClicked() }
+        panel.onRightClick = { [weak self] event, view in self?.showContextMenu(for: event, in: view) }
+        panel.onDidMove = { [weak self] origin in
+            guard let self else { return }
+            self.config.windowOriginX = origin.x
+            self.config.windowOriginY = origin.y
+            self.scheduleConfigSave()
+        }
+        panel.ignoresMouseEvents = config.isClickThrough
+
+        viewModel.contentSizeDidChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] size in self?.panel.resizeKeepingBottomLeft(to: size) }
+            .store(in: &cancellables)
+
+        let savedOrigin: NSPoint? = {
+            guard let x = config.windowOriginX, let y = config.windowOriginY else { return nil }
+            return NSPoint(x: x, y: y)
+        }()
+        panel.place(at: savedOrigin)
+
+        setUpStatusItem()
+        viewModel.start()
+        startSnapshotRequestWatcher()
+        if !config.isPetHidden {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        viewModel?.stop()
+        snapshotTimer?.invalidate()
+        if configSaveTimer != nil {
+            configSaveTimer?.invalidate()
+            config.save()
+        }
+    }
+
+    // MARK: - Debounced config save (didMove fires for every pixel while dragging)
+
+    private var configSaveTimer: Timer?
+
+    private func scheduleConfigSave() {
+        configSaveTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.6, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.configSaveTimer = nil
+                self.config.save()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        configSaveTimer = timer
+    }
+
+    // MARK: - Snapshot requests (`claude-pet snapshot`)
+
+    private var snapshotTimer: Timer?
+
+    private func startSnapshotRequestWatcher() {
+        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.answerSnapshotRequestIfAny() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        snapshotTimer = timer
+    }
+
+    private func answerSnapshotRequestIfAny() {
+        let requestURL = AppPaths.snapshotRequestFile
+        guard FileManager.default.fileExists(atPath: requestURL.path) else { return }
+        try? FileManager.default.removeItem(at: requestURL)
+        do {
+            try panel.writeSnapshot(to: AppPaths.snapshotImageFile)
+        } catch {
+            StandardError.print("claude-pet: snapshot failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Status bar
+
+    private func setUpStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "Claude Pet")
+            button.image?.isTemplate = true
+            button.toolTip = "Claude Pet"
+        }
+        let menu = NSMenu()
+        menu.delegate = self
+        statusItem.menu = menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        populateMenu(menu)
+    }
+
+    private func showContextMenu(for event: NSEvent, in view: NSView) {
+        let menu = NSMenu()
+        populateMenu(menu)
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+    }
+
+    private func populateMenu(_ menu: NSMenu) {
+        let headerTitle: String
+        if let session = viewModel.focusedSession {
+            headerTitle = "\(viewModel.pet.name) · \(session.projectName): \(viewModel.displayState.displayLabel)"
+        } else {
+            headerTitle = "\(viewModel.pet.name) · waiting for a Claude Code session"
+        }
+        let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        if !viewModel.sessions.isEmpty {
+            let sessionsMenu = NSMenu()
+            for session in viewModel.sessions {
+                let item = NSMenuItem(
+                    title: "\(session.projectName) — \(session.effectiveState.displayLabel)",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                item.isEnabled = false
+                item.toolTip = "\(session.cwd)\n\(session.message)"
+                sessionsMenu.addItem(item)
+            }
+            let sessionsItem = NSMenuItem(title: "Sessions (\(viewModel.sessions.count))", action: nil, keyEquivalent: "")
+            sessionsItem.submenu = sessionsMenu
+            menu.addItem(sessionsItem)
+        }
+
+        menu.addItem(.separator())
+
+        // Pet picker
+        let petMenu = NSMenu()
+        for loadedPet in library.pets {
+            let suffix = loadedPet.isBuiltIn ? "" : "  (custom)"
+            let item = NSMenuItem(title: loadedPet.definition.name + suffix, action: #selector(selectPetMenuItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = loadedPet.definition.id
+            item.state = loadedPet.definition.id == viewModel.pet.id ? .on : .off
+            item.toolTip = loadedPet.definition.description
+            petMenu.addItem(item)
+        }
+        petMenu.addItem(.separator())
+        petMenu.addItem(makeItem("Reload pets", action: #selector(reloadPets)))
+        petMenu.addItem(makeItem("Open pets folder…", action: #selector(openPetsFolder)))
+        let petItem = NSMenuItem(title: "Pet", action: nil, keyEquivalent: "")
+        petItem.submenu = petMenu
+        menu.addItem(petItem)
+
+        // Size picker
+        let sizeMenu = NSMenu()
+        for option in AppConfig.availablePixelScales {
+            let item = NSMenuItem(title: option.label, action: #selector(selectSizeMenuItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = option.scale
+            item.state = abs(CGFloat(option.scale) - viewModel.pixelScale) < 0.01 ? .on : .off
+            sizeMenu.addItem(item)
+        }
+        let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
+        sizeItem.submenu = sizeMenu
+        menu.addItem(sizeItem)
+
+        menu.addItem(.separator())
+
+        let bubbleItem = makeItem("Hide speech bubbles", action: #selector(toggleSpeechBubbles))
+        bubbleItem.state = config.isSpeechBubbleHidden ? .on : .off
+        menu.addItem(bubbleItem)
+
+        let clickThroughItem = makeItem("Click-through (ignore mouse)", action: #selector(toggleClickThrough))
+        clickThroughItem.state = config.isClickThrough ? .on : .off
+        clickThroughItem.toolTip = "When on, clicks pass through the pet. Use this menu bar item to turn it off again."
+        menu.addItem(clickThroughItem)
+
+        let hideItem = makeItem(config.isPetHidden ? "Show pet" : "Hide pet", action: #selector(togglePetHidden))
+        menu.addItem(hideItem)
+
+        menu.addItem(makeItem("Reset position", action: #selector(resetPosition)))
+
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Install Claude Code hooks…", action: #selector(installHooks)))
+        menu.addItem(makeItem("Open hook log", action: #selector(openHookLog)))
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Quit Claude Pet", action: #selector(quit), keyEquivalent: "q"))
+    }
+
+    private func makeItem(_ title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.target = self
+        return item
+    }
+
+    // MARK: - Menu actions
+
+    @objc private func selectPetMenuItem(_ sender: NSMenuItem) {
+        guard let petId = sender.representedObject as? String,
+              let loadedPet = library.pet(withId: petId) else { return }
+        viewModel.select(pet: loadedPet.definition)
+        config.selectedPetId = petId
+        config.save()
+    }
+
+    @objc private func selectSizeMenuItem(_ sender: NSMenuItem) {
+        guard let scale = sender.representedObject as? Double else { return }
+        viewModel.setPixelScale(CGFloat(scale))
+        config.pixelScale = scale
+        config.save()
+    }
+
+    @objc private func reloadPets() {
+        library = PetLibrary.load()
+        if let current = library.pet(withId: viewModel.pet.id) {
+            viewModel.select(pet: current.definition)
+        } else if let fallback = library.pets.first {
+            viewModel.select(pet: fallback.definition)
+        }
+        for problem in library.loadProblems {
+            StandardError.print("claude-pet: skipping user pet — \(problem)")
+        }
+    }
+
+    @objc private func openPetsFolder() {
+        try? AppPaths.ensureDirectoryExists(AppPaths.petsDirectory)
+        NSWorkspace.shared.open(AppPaths.petsDirectory)
+    }
+
+    @objc private func toggleSpeechBubbles() {
+        config.isSpeechBubbleHidden.toggle()
+        viewModel.isSpeechBubbleHidden = config.isSpeechBubbleHidden
+        config.save()
+    }
+
+    @objc private func toggleClickThrough() {
+        config.isClickThrough.toggle()
+        panel.ignoresMouseEvents = config.isClickThrough
+        config.save()
+    }
+
+    @objc private func togglePetHidden() {
+        config.isPetHidden.toggle()
+        if config.isPetHidden {
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
+        config.save()
+    }
+
+    @objc private func resetPosition() {
+        panel.setFrameOrigin(OverlayPanel.defaultOrigin(for: panel.frame.size))
+    }
+
+    @objc private func installHooks() {
+        let alert = NSAlert()
+        do {
+            let report = try HooksInstaller().install()
+            alert.messageText = "Claude Code hooks installed"
+            alert.informativeText = report.summaryText
+        } catch {
+            alert.alertStyle = .warning
+            alert.messageText = "Could not install hooks"
+            alert.informativeText = error.localizedDescription
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    @objc private func openHookLog() {
+        let logURL = AppPaths.hookLogFile
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            try? AppPaths.ensureDirectoryExists(logURL.deletingLastPathComponent())
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+        NSWorkspace.shared.open(logURL)
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+}
+
+/// Boots AppKit without an app bundle (`swift build` produces a bare executable).
+enum OverlayApp {
+    @MainActor
+    static func run() -> Never {
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        application.run()
+        exit(0)
+    }
+}
