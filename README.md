@@ -82,7 +82,18 @@ claude-pet install-hooks [--print]   / uninstall-hooks
 ```
 
 **Click** the pet to pet it (hearts + a line of dialogue), **drag** to move, **right-click** (or the menu bar 🐾) for the menu:
-choose pet · size (Small/Medium/Large) · hide speech bubbles · click-through · hide pet · reset position · install hooks · open hook log.
+choose pet · size (Small/Medium/Large) · sessions (pin one) · show all sessions side by side · hide speech bubbles · click-through · hide pet · reset position · install hooks · open hook log.
+
+### Several sessions at once
+
+Collapsed, the pet shows the session that matters most (waiting for approval > busy > most recent) with a `project +N` badge — a red dot on it means *another* session is waiting on you. **Click the pet to fan the sessions out**: the current one stays in the middle at full size and the others line up left and right at 70 %, each with its own expression, status badge and project name.
+
+![sessions](docs/sessions.png)
+
+- Click a side pet to **pin** that session as the primary one (overrides the automatic rule; "Sessions → Automatic" in the menu undoes it).
+- Click the primary pet again to collapse. The row collapses by itself when only one session is left.
+- Menu → "Show all sessions side by side" keeps the row expanded permanently.
+- The primary pet stays exactly where it was on screen while the row grows and shrinks around it.
 
 Preferences live in `~/.claude-pet/config.json`.
 

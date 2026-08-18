@@ -27,23 +27,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         viewModel = PetViewModel(
             pet: selectedPet.definition,
             pixelScale: CGFloat(config.pixelScale),
-            isSpeechBubbleHidden: config.isSpeechBubbleHidden
+            isSpeechBubbleHidden: config.isSpeechBubbleHidden,
+            isAlwaysFannedOut: config.isSessionsAlwaysExpanded
         )
 
         panel = OverlayPanel(contentSize: viewModel.contentSize, rootView: PetView(model: viewModel))
-        panel.onClick = { [weak self] in self?.viewModel.petWasClicked() }
+        panel.onClick = { [weak self] point in self?.viewModel.handleClick(atContentX: point.x) }
         panel.onRightClick = { [weak self] event, view in self?.showContextMenu(for: event, in: view) }
         panel.onDidMove = { [weak self] origin in
             guard let self else { return }
-            self.config.windowOriginX = origin.x
+            // Store where the *collapsed* panel would sit, so a restart (always collapsed at first)
+            // puts the primary pet back at the same spot even if we were fanned out when moved.
+            let primaryScreenX = origin.x + self.viewModel.layout.primaryCenterX
+            self.config.windowOriginX = primaryScreenX - self.viewModel.collapsedLayout.primaryCenterX
             self.config.windowOriginY = origin.y
             self.scheduleConfigSave()
         }
         panel.ignoresMouseEvents = config.isClickThrough
 
-        viewModel.contentSizeDidChange
+        var lastPrimaryCenterX = viewModel.layout.primaryCenterX
+        viewModel.layoutDidChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] size in self?.panel.resizeKeepingBottomLeft(to: size) }
+            .sink { [weak self] newLayout in
+                guard let self else { return }
+                // Keep the primary pet where it is on screen while the row grows or shrinks around it.
+                let anchorScreenX = self.panel.frame.minX + lastPrimaryCenterX
+                self.panel.resize(to: newLayout.contentSize, keepingContentX: newLayout.primaryCenterX, atScreenX: anchorScreenX)
+                lastPrimaryCenterX = newLayout.primaryCenterX
+            }
             .store(in: &cancellables)
 
         let savedOrigin: NSPoint? = {
@@ -99,6 +110,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func answerSnapshotRequestIfAny() {
+        let clickURL = AppPaths.clickRequestFile
+        if let data = try? Data(contentsOf: clickURL) {
+            try? FileManager.default.removeItem(at: clickURL)
+            let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let x = Double(text) {
+                viewModel.handleClick(atContentX: CGFloat(x))
+            } else if text == "primary" {
+                viewModel.handleClick(atContentX: viewModel.layout.primaryCenterX)
+            }
+        }
+
         let requestURL = AppPaths.snapshotRequestFile
         guard FileManager.default.fileExists(atPath: requestURL.path) else { return }
         try? FileManager.default.removeItem(at: requestURL)
@@ -147,20 +169,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !viewModel.sessions.isEmpty {
             let sessionsMenu = NSMenu()
+            let autoItem = makeItem("Automatic (approval > busy > recent)", action: #selector(followSessionsAutomatically))
+            autoItem.state = viewModel.pinnedSessionId == nil ? .on : .off
+            sessionsMenu.addItem(autoItem)
+            sessionsMenu.addItem(.separator())
             for session in viewModel.sessions {
                 let item = NSMenuItem(
                     title: "\(session.projectName) — \(session.effectiveState.displayLabel)",
-                    action: nil,
+                    action: #selector(pinSessionMenuItem(_:)),
                     keyEquivalent: ""
                 )
-                item.isEnabled = false
-                item.toolTip = "\(session.cwd)\n\(session.message)"
+                item.target = self
+                item.representedObject = session.sessionId
+                item.state = session.sessionId == viewModel.pinnedSessionId ? .on : .off
+                item.toolTip = "\(session.cwd)\n\(session.message)\nClick to keep this session in front."
                 sessionsMenu.addItem(item)
             }
             let sessionsItem = NSMenuItem(title: "Sessions (\(viewModel.sessions.count))", action: nil, keyEquivalent: "")
             sessionsItem.submenu = sessionsMenu
             menu.addItem(sessionsItem)
         }
+
+        let expandItem = makeItem("Show all sessions side by side", action: #selector(toggleAlwaysExpanded))
+        expandItem.state = config.isSessionsAlwaysExpanded ? .on : .off
+        expandItem.toolTip = "Off: click the pet to fan sessions out temporarily. On: always show one pet per session."
+        menu.addItem(expandItem)
 
         menu.addItem(.separator())
 
@@ -259,6 +292,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openPetsFolder() {
         try? AppPaths.ensureDirectoryExists(AppPaths.petsDirectory)
         NSWorkspace.shared.open(AppPaths.petsDirectory)
+    }
+
+    @objc private func pinSessionMenuItem(_ sender: NSMenuItem) {
+        guard let sessionId = sender.representedObject as? String else { return }
+        viewModel.pin(sessionId: sessionId)
+    }
+
+    @objc private func followSessionsAutomatically() {
+        viewModel.pin(sessionId: nil)
+    }
+
+    @objc private func toggleAlwaysExpanded() {
+        config.isSessionsAlwaysExpanded.toggle()
+        viewModel.isAlwaysFannedOut = config.isSessionsAlwaysExpanded
+        config.save()
     }
 
     @objc private func toggleSpeechBubbles() {

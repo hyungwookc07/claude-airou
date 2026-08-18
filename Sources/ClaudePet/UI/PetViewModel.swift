@@ -4,14 +4,10 @@ import Foundation
 import SwiftUI
 
 /// Drives the overlay: polls the session state directory, decides which session the pet
-/// represents, decays transient states, and advances sprite frames.
+/// represents, decays transient states, advances sprite frames, and lays out the row of
+/// session cards (one pet when collapsed, one pet per session when fanned out).
 @MainActor
 final class PetViewModel: ObservableObject {
-    // Layout constants (points)
-    static let speechBubbleReservedHeight: CGFloat = 58
-    static let sessionBadgeReservedHeight: CGFloat = 22
-    static let horizontalPadding: CGFloat = 16
-    static let minimumContentWidth: CGFloat = 220
     static let tickIntervalSeconds: TimeInterval = 0.1
     static let stateReloadEveryTicks = 3
     static let petReactionDurationSeconds: TimeInterval = 2.5
@@ -25,14 +21,25 @@ final class PetViewModel: ObservableObject {
     @Published private(set) var displayMessage: String = ""
     @Published private(set) var frameIndex: Int = 0
     @Published private(set) var petReactionMessage: String?
-    @Published var pixelScale: CGFloat
+    @Published private(set) var pixelScale: CGFloat
     @Published var isSpeechBubbleHidden: Bool
     @Published private(set) var doneBounceTrigger: Int = 0
     @Published private(set) var errorShakeTrigger: Int = 0
     @Published private(set) var petReactionTrigger: Int = 0
 
-    /// Fires whenever the content size might have changed (pet or scale) so the panel can resize.
-    let contentSizeDidChange = PassthroughSubject<CGSize, Never>()
+    /// Fan-out: show every session side by side. Toggled by clicking the pet; forced by the menu.
+    @Published private(set) var isFannedOut = false
+    @Published var isAlwaysFannedOut: Bool {
+        didSet { relayoutIfNeeded() }
+    }
+    /// User-chosen focus (click a side pet / pick from the menu). Overrides the automatic rule.
+    @Published private(set) var pinnedSessionId: String?
+
+    /// Current geometry; the panel resizes from this.
+    @Published private(set) var layout: RowLayout
+
+    /// Fires whenever `layout` changed in a way that needs the panel resized (size or primary position).
+    let layoutDidChange = PassthroughSubject<RowLayout, Never>()
 
     private let stateStore: SessionStateStore
     private var timer: Timer?
@@ -42,33 +49,41 @@ final class PetViewModel: ObservableObject {
     private var previousDisplayState: PetState = .idle
     private var previousFocusedSessionId: String?
 
-    init(pet: PetDefinition, pixelScale: CGFloat, isSpeechBubbleHidden: Bool, stateStore: SessionStateStore = SessionStateStore()) {
+    init(
+        pet: PetDefinition,
+        pixelScale: CGFloat,
+        isSpeechBubbleHidden: Bool,
+        isAlwaysFannedOut: Bool,
+        stateStore: SessionStateStore = SessionStateStore()
+    ) {
         self.pet = pet
         self.palette = ResolvedPalette(definition: pet)
         self.pixelScale = pixelScale
         self.isSpeechBubbleHidden = isSpeechBubbleHidden
+        self.isAlwaysFannedOut = isAlwaysFannedOut
         self.stateStore = stateStore
+        self.layout = RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: ["no session"], sessionIds: [nil], primaryIndex: 0)
     }
 
-    // MARK: - Derived layout
+    // MARK: - Derived
 
-    var spriteSize: CGSize {
-        let grid = pet.gridSize
-        return CGSize(width: CGFloat(grid.width) * pixelScale, height: CGFloat(grid.height) * pixelScale)
+    var isExpanded: Bool { (isFannedOut || isAlwaysFannedOut) && sessions.count >= 2 }
+
+    var contentSize: CGSize { layout.contentSize }
+
+    /// Geometry of the collapsed (single-card) row for the current pet and scale — used to
+    /// store a stable window position regardless of the current fan-out state.
+    var collapsedLayout: RowLayout {
+        RowLayout.make(gridSize: pet.gridSize, pixelScale: pixelScale, labels: [collapsedLabel], sessionIds: [focusedSession?.sessionId], primaryIndex: 0)
     }
 
-    var contentSize: CGSize {
-        let sprite = spriteSize
-        let width = max(Self.minimumContentWidth, sprite.width + Self.horizontalPadding * 2)
-        let height = Self.speechBubbleReservedHeight + sprite.height + Self.sessionBadgeReservedHeight + 12
-        return CGSize(width: width, height: height)
-    }
-
-    var currentFrame: [String] {
-        let frames = pet.frames(for: displayState)
+    func frame(for state: PetState) -> [String] {
+        let frames = pet.frames(for: state)
         guard !frames.isEmpty else { return [] }
         return frames[frameIndex % frames.count]
     }
+
+    var currentFrame: [String] { frame(for: displayState) }
 
     var isSpeechBubbleVisible: Bool {
         if petReactionMessage != nil { return true }
@@ -76,16 +91,31 @@ final class PetViewModel: ObservableObject {
         return !displayMessage.isEmpty
     }
 
-    var speechBubbleText: String {
-        petReactionMessage ?? displayMessage
-    }
+    var speechBubbleText: String { petReactionMessage ?? displayMessage }
 
     var activeSessionCount: Int { sessions.count }
 
-    var sessionBadgeText: String {
+    /// Label for the collapsed badge: "project" or "project +2".
+    var collapsedLabel: String {
         guard let focusedSession else { return "no session" }
         let extra = sessions.count - 1
         return extra > 0 ? "\(focusedSession.projectName) +\(extra)" : focusedSession.projectName
+    }
+
+    /// True when a session other than the focused one is waiting on the user (shown as a red dot on the badge).
+    var hasHiddenAttention: Bool {
+        sessions.contains { $0.sessionId != focusedSession?.sessionId && $0.effectiveState.isAttentionNeeded }
+    }
+
+    func session(withId id: String?) -> SessionSnapshot? {
+        guard let id else { return nil }
+        return sessions.first { $0.sessionId == id }
+    }
+
+    /// The state to draw for a given card (transient decay applied).
+    func state(for card: RowLayout.Card) -> PetState {
+        if card.isPrimary { return displayState }
+        return session(withId: card.sessionId)?.effectiveState ?? .idle
     }
 
     // MARK: - Lifecycle
@@ -121,8 +151,16 @@ final class PetViewModel: ObservableObject {
         // Only publish when something actually changed; this runs several times a second.
         if loaded != sessions { sessions = loaded }
 
-        // Attention-needing sessions win, then busy ones, then the most recently updated one.
-        let focused = loaded.first(where: { $0.effectiveState.isAttentionNeeded })
+        if let pinnedSessionId, !loaded.contains(where: { $0.sessionId == pinnedSessionId }) {
+            self.pinnedSessionId = nil // the pinned session ended
+        }
+        if loaded.count < 2, isFannedOut {
+            isFannedOut = false // nothing left to fan out
+        }
+
+        // Pinned session wins, then attention-needing, then busy, then the most recently updated.
+        let focused = loaded.first(where: { $0.sessionId == pinnedSessionId })
+            ?? loaded.first(where: { $0.effectiveState.isAttentionNeeded })
             ?? loaded.first(where: { $0.effectiveState.isBusy })
             ?? loaded.first
         if focused != focusedSession { focusedSession = focused }
@@ -147,6 +185,8 @@ final class PetViewModel: ObservableObject {
         previousFocusedSessionId = focused?.sessionId
         if newState != displayState { displayState = newState }
         if newMessage != displayMessage { displayMessage = newMessage }
+
+        relayoutIfNeeded()
     }
 
     private func advanceFrameIfDue() {
@@ -158,9 +198,84 @@ final class PetViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Layout
+
+    /// Row order when expanded: primary in the middle, the others alternating right/left by recency.
+    private func expandedRow() -> [SessionSnapshot] {
+        guard let focusedSession else { return [] }
+        let others = sessions.filter { $0.sessionId != focusedSession.sessionId }
+        var left: [SessionSnapshot] = []
+        var right: [SessionSnapshot] = []
+        for (index, session) in others.enumerated() {
+            if index % 2 == 0 { right.append(session) } else { left.append(session) }
+        }
+        return left.reversed() + [focusedSession] + right
+    }
+
+    private func relayoutIfNeeded() {
+        let newLayout: RowLayout
+        if isExpanded {
+            let row = expandedRow()
+            let primaryIndex = row.firstIndex { $0.sessionId == focusedSession?.sessionId } ?? 0
+            newLayout = RowLayout.make(
+                gridSize: pet.gridSize,
+                pixelScale: pixelScale,
+                labels: row.map(\.projectName),
+                sessionIds: row.map { Optional($0.sessionId) },
+                primaryIndex: primaryIndex
+            )
+        } else {
+            newLayout = collapsedLayout
+        }
+        guard newLayout != layout else { return }
+        let needsPanelUpdate = newLayout.contentSize != layout.contentSize || newLayout.primaryCenterX != layout.primaryCenterX
+        layout = newLayout
+        if needsPanelUpdate {
+            layoutDidChange.send(newLayout)
+        }
+    }
+
     // MARK: - User interaction
 
-    /// The user clicked the pet: react with a phrase (does not touch session state).
+    /// A click at `contentX` (points from the panel's left edge).
+    func handleClick(atContentX contentX: CGFloat) {
+        guard sessions.count >= 2 else {
+            petWasClicked()
+            return
+        }
+        if !isExpanded {
+            isFannedOut = true
+            relayoutIfNeeded()
+            return
+        }
+        guard let card = layout.card(atContentX: contentX) else {
+            collapse()
+            return
+        }
+        if card.isPrimary {
+            if isAlwaysFannedOut {
+                petWasClicked() // can't collapse; treat as petting
+            } else {
+                collapse()
+            }
+        } else if let sessionId = card.sessionId {
+            pin(sessionId: sessionId)
+        }
+    }
+
+    func collapse() {
+        guard isFannedOut else { return }
+        isFannedOut = false
+        relayoutIfNeeded()
+    }
+
+    /// Make a session the primary one, overriding the automatic focus rule. `nil` restores automatic.
+    func pin(sessionId: String?) {
+        pinnedSessionId = sessionId
+        reloadSessions()
+    }
+
+    /// The user clicked the pet itself: react with a phrase (does not touch session state).
     func petWasClicked() {
         petReactionMessage = pet.petPhrases.randomElement()
         petReactionExpiresAt = Date().addingTimeInterval(Self.petReactionDurationSeconds)
@@ -179,11 +294,11 @@ final class PetViewModel: ObservableObject {
         pet = newPet
         palette = ResolvedPalette(definition: newPet)
         frameIndex = 0
-        contentSizeDidChange.send(contentSize)
+        relayoutIfNeeded()
     }
 
     func setPixelScale(_ newScale: CGFloat) {
         pixelScale = newScale
-        contentSizeDidChange.send(contentSize)
+        relayoutIfNeeded()
     }
 }

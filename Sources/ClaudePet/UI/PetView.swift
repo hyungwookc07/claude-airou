@@ -1,22 +1,40 @@
 import SwiftUI
 
-/// The whole overlay content: speech bubble on top, sprite in the middle, session badge below.
+/// The whole overlay content: a row of session cards (one pet, or one per session when fanned
+/// out) with the speech bubble floating above the primary card.
 struct PetView: View {
     @ObservedObject var model: PetViewModel
 
+    private static let speechBubbleMaxWidth: CGFloat = 210
+
     var body: some View {
-        VStack(spacing: 4) {
+        let layout = model.layout
+        let cardHeight = layout.primarySpriteSize.height + RowLayout.sessionBadgeReservedHeight + 4
+        let cardsCenterY = RowLayout.speechBubbleReservedHeight + cardHeight / 2
+
+        ZStack(alignment: .topLeading) {
+            ForEach(layout.cards) { card in
+                SessionCardView(model: model, card: card, cardHeight: cardHeight)
+                    .frame(width: card.width, height: cardHeight)
+                    .position(x: card.centerX, y: cardsCenterY)
+            }
+
             speechBubbleArea
-                .frame(height: PetViewModel.speechBubbleReservedHeight, alignment: .bottom)
-
-            spriteWithStatus
-                .frame(width: model.spriteSize.width, height: model.spriteSize.height)
-
-            SessionBadge(text: model.sessionBadgeText, isDimmed: model.focusedSession == nil)
-                .frame(height: PetViewModel.sessionBadgeReservedHeight)
+                .frame(width: bubbleWidth(in: layout), height: RowLayout.speechBubbleReservedHeight, alignment: .bottom)
+                .position(x: bubbleCenterX(in: layout), y: RowLayout.speechBubbleReservedHeight / 2)
         }
-        .padding(.horizontal, PetViewModel.horizontalPadding)
-        .frame(width: model.contentSize.width, height: model.contentSize.height)
+        .frame(width: layout.contentSize.width, height: layout.contentSize.height)
+        .animation(.spring(duration: 0.28), value: layout)
+    }
+
+    private func bubbleWidth(in layout: RowLayout) -> CGFloat {
+        min(Self.speechBubbleMaxWidth, layout.contentSize.width - 8)
+    }
+
+    /// Centre the bubble over the primary pet, but keep it inside the panel.
+    private func bubbleCenterX(in layout: RowLayout) -> CGFloat {
+        let half = bubbleWidth(in: layout) / 2
+        return min(max(layout.primaryCenterX, half + 4), layout.contentSize.width - half - 4)
     }
 
     // MARK: - Speech bubble
@@ -31,30 +49,72 @@ struct PetView: View {
         .animation(.easeOut(duration: 0.16), value: model.isSpeechBubbleVisible)
         .animation(.easeOut(duration: 0.16), value: model.speechBubbleText)
     }
+}
 
-    // MARK: - Sprite
+// MARK: - One session card (sprite + status badge + label)
 
-    private var spriteWithStatus: some View {
+struct SessionCardView: View {
+    @ObservedObject var model: PetViewModel
+    let card: RowLayout.Card
+    let cardHeight: CGFloat
+
+    private var spriteSize: CGSize {
+        let grid = model.pet.gridSize
+        return CGSize(width: CGFloat(grid.width) * card.pixelScale, height: CGFloat(grid.height) * card.pixelScale)
+    }
+
+    var body: some View {
+        let state = model.state(for: card)
+        VStack(spacing: 4) {
+            Spacer(minLength: 0)
+            sprite(state: state)
+                .frame(width: spriteSize.width, height: spriteSize.height)
+            if card.isPrimary {
+                SessionBadge(
+                    text: model.isExpanded ? card.label : model.collapsedLabel,
+                    isDimmed: model.focusedSession == nil,
+                    isHighlighted: model.isExpanded,
+                    hasAttentionDot: !model.isExpanded && model.hasHiddenAttention
+                )
+                .frame(height: RowLayout.sessionBadgeReservedHeight)
+            } else {
+                SessionBadge(text: card.label, isDimmed: false, isHighlighted: false, hasAttentionDot: false)
+                    .frame(height: RowLayout.sessionBadgeReservedHeight)
+            }
+        }
+        .frame(height: cardHeight, alignment: .bottom)
+        .opacity(card.isPrimary ? 1 : 0.92)
+    }
+
+    @ViewBuilder
+    private func sprite(state: PetState) -> some View {
+        let canvas = SpriteCanvas(frame: model.frame(for: state), palette: model.palette, pixelScale: card.pixelScale)
         ZStack(alignment: .topTrailing) {
-            SpriteCanvas(frame: model.currentFrame, palette: model.palette, pixelScale: model.pixelScale)
-                .phaseAnimator([0.0, -14.0, 0.0, -7.0, 0.0], trigger: model.doneBounceTrigger) { content, offsetY in
-                    content.offset(y: offsetY)
-                } animation: { _ in
-                    .spring(duration: 0.16, bounce: 0.25)
-                }
-                .phaseAnimator([0.0, -5.0, 5.0, -4.0, 4.0, 0.0], trigger: model.errorShakeTrigger) { content, offsetX in
-                    content.offset(x: offsetX)
-                } animation: { _ in
-                    .linear(duration: 0.06)
-                }
+            if card.isPrimary {
+                canvas
+                    .phaseAnimator([0.0, -14.0, 0.0, -7.0, 0.0], trigger: model.doneBounceTrigger) { content, offsetY in
+                        content.offset(y: offsetY)
+                    } animation: { _ in
+                        .spring(duration: 0.16, bounce: 0.25)
+                    }
+                    .phaseAnimator([0.0, -5.0, 5.0, -4.0, 4.0, 0.0], trigger: model.errorShakeTrigger) { content, offsetX in
+                        content.offset(x: offsetX)
+                    } animation: { _ in
+                        .linear(duration: 0.06)
+                    }
+            } else {
+                canvas
+            }
 
-            StatusBadge(state: model.displayState)
-                .offset(x: 10, y: -8)
-                .animation(.spring(duration: 0.25), value: model.displayState)
+            StatusBadge(state: state, isCompact: !card.isPrimary)
+                .offset(x: card.isPrimary ? 10 : 6, y: card.isPrimary ? -8 : -6)
+                .animation(.spring(duration: 0.25), value: state)
 
-            FloatingHeart(trigger: model.petReactionTrigger)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .offset(y: -6)
+            if card.isPrimary {
+                FloatingHeart(trigger: model.petReactionTrigger)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .offset(y: -6)
+            }
         }
     }
 }
@@ -124,7 +184,6 @@ struct SpeechBubble: View {
                     .frame(width: 12, height: 6)
                     .offset(y: 5.5)
             }
-            .frame(maxWidth: 210)
     }
 }
 
@@ -143,24 +202,25 @@ struct BubbleTail: Shape {
 
 struct StatusBadge: View {
     let state: PetState
+    var isCompact = false
 
     var body: some View {
         switch state {
         case .waitingApproval:
-            BadgeIcon(systemName: "clock.fill", tint: .red, isPulsing: true, isSpinning: false)
+            BadgeIcon(systemName: "clock.fill", tint: .red, isPulsing: true, isSpinning: false, isCompact: isCompact)
         case .needsInput:
-            BadgeIcon(systemName: "questionmark.circle.fill", tint: .orange, isPulsing: true, isSpinning: false)
+            BadgeIcon(systemName: "questionmark.circle.fill", tint: .orange, isPulsing: true, isSpinning: false, isCompact: isCompact)
         case .done:
-            BadgeIcon(systemName: "checkmark.circle.fill", tint: .green, isPulsing: false, isSpinning: false)
+            BadgeIcon(systemName: "checkmark.circle.fill", tint: .green, isPulsing: false, isSpinning: false, isCompact: isCompact)
         case .error:
-            BadgeIcon(systemName: "exclamationmark.triangle.fill", tint: .red, isPulsing: false, isSpinning: false)
+            BadgeIcon(systemName: "exclamationmark.triangle.fill", tint: .red, isPulsing: false, isSpinning: false, isCompact: isCompact)
         case .working:
-            BadgeIcon(systemName: "gearshape.fill", tint: .blue, isPulsing: false, isSpinning: true)
+            BadgeIcon(systemName: "gearshape.fill", tint: .blue, isPulsing: false, isSpinning: true, isCompact: isCompact)
         case .thinking:
             // The sprite's own thinking frames (thought dots, eyes up) carry this state; a badge would be redundant.
             EmptyView()
         case .hello:
-            BadgeIcon(systemName: "hand.wave.fill", tint: .yellow, isPulsing: false, isSpinning: false)
+            BadgeIcon(systemName: "hand.wave.fill", tint: .yellow, isPulsing: false, isSpinning: false, isCompact: isCompact)
         case .idle:
             EmptyView()
         }
@@ -172,15 +232,16 @@ struct BadgeIcon: View {
     let tint: Color
     let isPulsing: Bool
     let isSpinning: Bool
+    var isCompact = false
 
     @State private var isRotating = false
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: 13, weight: .bold))
+            .font(.system(size: isCompact ? 10 : 13, weight: .bold))
             .foregroundStyle(.white, tint)
             .symbolRenderingMode(.palette)
-            .padding(3)
+            .padding(isCompact ? 2 : 3)
             .background(Circle().fill(tint))
             .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5))
             .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
@@ -217,16 +278,23 @@ struct FloatingHeart: View {
 struct SessionBadge: View {
     let text: String
     let isDimmed: Bool
+    var isHighlighted = false
+    var hasAttentionDot = false
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-            .foregroundStyle(isDimmed ? .tertiary : .secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2.5)
-            .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1)))
-            .frame(maxWidth: 200)
+        HStack(spacing: 4) {
+            if hasAttentionDot {
+                Circle().fill(.red).frame(width: 6, height: 6)
+            }
+            Text(text)
+                .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(isDimmed ? .tertiary : .secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2.5)
+        .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
+        .overlay(Capsule().strokeBorder(isHighlighted ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.1), lineWidth: isHighlighted ? 1.2 : 1))
+        .frame(maxWidth: 200)
     }
 }

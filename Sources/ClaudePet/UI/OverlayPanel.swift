@@ -4,7 +4,8 @@ import SwiftUI
 /// A borderless, transparent, always-on-top panel that never steals focus.
 /// Dragging anywhere on it moves it; a plain click "pets" the creature; right-click opens the menu.
 final class OverlayPanel: NSPanel {
-    var onClick: (() -> Void)?
+    /// Called with the click location in content coordinates (points from the left edge).
+    var onClick: ((NSPoint) -> Void)?
     var onRightClick: ((NSEvent, NSView) -> Void)?
     var onDidMove: ((NSPoint) -> Void)?
 
@@ -44,7 +45,7 @@ final class OverlayPanel: NSPanel {
         ])
         contentView = containerView
 
-        containerView.onClick = { [weak self] in self?.onClick?() }
+        containerView.onClick = { [weak self] point in self?.onClick?(point) }
         containerView.onRightClick = { [weak self] event, view in self?.onRightClick?(event, view) }
         containerView.onDragStarted = { [weak self] event in self?.performDrag(with: event) }
 
@@ -111,6 +112,14 @@ final class OverlayPanel: NSPanel {
         nudgeOntoScreen()
     }
 
+    /// Resizes so that the content point `contentX` (points from the left) stays at the same
+    /// screen x — used to keep the primary pet still while the row fans out around it.
+    func resize(to size: CGSize, keepingContentX contentX: CGFloat, atScreenX screenX: CGFloat) {
+        let newFrame = NSRect(x: (screenX - contentX).rounded(), y: frame.minY, width: size.width, height: size.height)
+        setFrame(newFrame, display: true, animate: false)
+        nudgeOntoScreen()
+    }
+
     /// Slides the panel back inside the nearest screen's visible area if it grew or was
     /// restored partly off-screen; falls back to the default corner if no screen is near.
     func nudgeOntoScreen() {
@@ -137,7 +146,7 @@ final class OverlayPanel: NSPanel {
 /// Container that swallows all mouse events (so SwiftUI never fights us over them) and
 /// turns them into click / drag / right-click callbacks.
 final class PetContainerView: NSView {
-    var onClick: (() -> Void)?
+    var onClick: ((NSPoint) -> Void)?
     var onRightClick: ((NSEvent, NSView) -> Void)?
     var onDragStarted: ((NSEvent) -> Void)?
 
@@ -176,7 +185,11 @@ final class PetContainerView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !didDrag, mouseDownEvent != nil { onClick?() }
+        if !didDrag, mouseDownEvent != nil {
+            // Content coordinates: x from the left, y from the top (matches SwiftUI's layout space).
+            let location = convert(event.locationInWindow, from: nil)
+            onClick?(NSPoint(x: location.x, y: bounds.height - location.y))
+        }
         mouseDownEvent = nil
         didDrag = false
     }

@@ -27,6 +27,7 @@ enum CommandLineInterface {
       claude-pet status                Print the sessions the overlay currently sees
       claude-pet snapshot [--out FILE.png]
                                        Ask the running overlay to save a PNG of itself
+      claude-pet click [primary|X]     Click the running overlay (primary pet, or x in points) — for testing
       claude-pet help
 
     FILES
@@ -115,6 +116,8 @@ enum CommandLineInterface {
             return runStatus()
         case "snapshot":
             return runSnapshot(parsed)
+        case "click":
+            return runClick(rest)
         case "help":
             print(usageText)
             return 0
@@ -419,6 +422,19 @@ enum CommandLineInterface {
         try? FileManager.default.removeItem(at: AppPaths.snapshotRequestFile)
         StandardError.print("claude-pet snapshot: no answer from the overlay — is `claude-pet run` running?")
         return 1
+    }
+
+    /// Scripted click on the running overlay: `claude-pet click primary` or `claude-pet click 42` (x in points).
+    private static func runClick(_ positional: [String]) -> Int32 {
+        let target = positional.first ?? "primary"
+        do {
+            try AppPaths.ensureDirectoryExists(AppPaths.rootDirectory)
+            try Data(target.utf8).write(to: AppPaths.clickRequestFile, options: .atomic)
+            return 0
+        } catch {
+            StandardError.print("claude-pet click: \(error.localizedDescription)")
+            return 1
+        }
     }
 
     private static func runStatus() -> Int32 {

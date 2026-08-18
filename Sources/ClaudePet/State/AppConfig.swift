@@ -18,6 +18,8 @@ struct AppConfig: Codable, Equatable {
     var isSpeechBubbleHidden: Bool = false
     var isClickThrough: Bool = false
     var isPetHidden: Bool = false
+    /// Show one pet per session all the time instead of only after a click.
+    var isSessionsAlwaysExpanded: Bool = false
 
     init() {}
 
@@ -32,6 +34,7 @@ struct AppConfig: Codable, Equatable {
         isSpeechBubbleHidden = try container.decodeIfPresent(Bool.self, forKey: .isSpeechBubbleHidden) ?? false
         isClickThrough = try container.decodeIfPresent(Bool.self, forKey: .isClickThrough) ?? false
         isPetHidden = try container.decodeIfPresent(Bool.self, forKey: .isPetHidden) ?? false
+        isSessionsAlwaysExpanded = try container.decodeIfPresent(Bool.self, forKey: .isSessionsAlwaysExpanded) ?? false
     }
 
     static func load(from url: URL = AppPaths.configFile) -> AppConfig {

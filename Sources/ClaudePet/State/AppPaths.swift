@@ -19,6 +19,8 @@ enum AppPaths {
     static var snapshotRequestFile: URL { rootDirectory.appendingPathComponent("snapshot.request") }
     static var snapshotImageFile: URL { rootDirectory.appendingPathComponent("snapshot.png") }
     static var overlayLockFile: URL { rootDirectory.appendingPathComponent("overlay.lock") }
+    /// `claude-pet click X` drops this file (content: x in points) so the overlay behaves as if clicked — for scripted testing.
+    static var clickRequestFile: URL { rootDirectory.appendingPathComponent("click.request") }
 
     static var claudeSettingsFile: URL {
         FileManager.default.homeDirectoryForCurrentUser
