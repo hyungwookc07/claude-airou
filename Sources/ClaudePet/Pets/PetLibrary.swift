@@ -11,6 +11,7 @@ enum BuiltInPets {
         ("jelly-slime.json", PackageResources.jelly_slime_json),
         ("bolt-robot.json", PackageResources.bolt_robot_json),
         ("inky-octopus.json", PackageResources.inky_octopus_json),
+        ("clawd-claude.json", PackageResources.clawd_claude_json),
     ]
 
     static func loadAll() -> [PetDefinition] {

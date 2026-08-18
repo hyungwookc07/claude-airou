@@ -320,10 +320,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 enum OverlayApp {
     @MainActor
     static func run() -> Never {
+        guard SingleInstanceLock.acquire() else {
+            StandardError.print("claude-pet: the overlay is already running (lock: \(AppPaths.overlayLockFile.path)). Nothing to do.")
+            exit(0)
+        }
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
         application.run()
         exit(0)
+    }
+}
+
+/// One overlay per user: a second `claude-pet run` (double-click, LaunchAgent + manual start)
+/// exits immediately instead of stacking pets. Uses `flock`, so the lock vanishes with the process.
+enum SingleInstanceLock {
+    private static var lockFileDescriptor: Int32 = -1
+
+    static func acquire() -> Bool {
+        do {
+            try AppPaths.ensureDirectoryExists(AppPaths.rootDirectory)
+        } catch {
+            return true // can't even create our dir; don't block startup over the lock
+        }
+        let descriptor = open(AppPaths.overlayLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { return true }
+        if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            close(descriptor)
+            return false
+        }
+        lockFileDescriptor = descriptor // keep it open for the life of the process
+        return true
     }
 }

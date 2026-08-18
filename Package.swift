@@ -15,6 +15,7 @@ let package = Package(
                 .embedInCode("Resources/pets/jelly-slime.json"),
                 .embedInCode("Resources/pets/bolt-robot.json"),
                 .embedInCode("Resources/pets/inky-octopus.json"),
+                .embedInCode("Resources/pets/clawd-claude.json"),
             ]
         )
     ]

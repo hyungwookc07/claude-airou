@@ -11,7 +11,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 ![states](docs/states.png)
 
-내장 펫 6종 — Mochi(고양이) · Quackers(오리) · Boo(유령) · Jelly(슬라임) · Bolt(로봇) · Inky(문어):
+내장 펫 7종 — Mochi(고양이) · Quackers(오리) · Boo(유령) · Jelly(슬라임) · Bolt(로봇) · Inky(문어) · **Clawd**(Claude Code 시작 화면의 그 주황 마스코트, `docs/make_clawd.py`로 생성):
 
 ![pets](docs/pets.png)
 
@@ -29,7 +29,8 @@ claude-pet        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
 
 이미 열려 있던 Claude Code 세션은 hook 설정을 다시 읽지 않으므로 **새 세션을 시작**해야 펫이 반응한다.
 
-로그인 시 자동 실행: `make autostart` (해제는 `make no-autostart`).
+로그인 시 자동 실행: `make autostart` (LaunchAgent `dev.claude-pet.overlay`; 해제는 `make no-autostart`).
+오버레이는 한 번에 하나만 뜬다 — 두 번째 `claude-pet run`은 "already running"만 찍고 종료한다 (`~/.claude-pet/overlay.lock`).
 
 ## 동작 원리
 

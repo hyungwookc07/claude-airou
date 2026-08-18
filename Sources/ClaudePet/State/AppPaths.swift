@@ -18,6 +18,7 @@ enum AppPaths {
     /// `claude-pet snapshot` drops this file; the running overlay answers by writing `snapshotImageFile`.
     static var snapshotRequestFile: URL { rootDirectory.appendingPathComponent("snapshot.request") }
     static var snapshotImageFile: URL { rootDirectory.appendingPathComponent("snapshot.png") }
+    static var overlayLockFile: URL { rootDirectory.appendingPathComponent("overlay.lock") }
 
     static var claudeSettingsFile: URL {
         FileManager.default.homeDirectoryForCurrentUser
