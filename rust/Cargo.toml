@@ -1,0 +1,29 @@
+[package]
+name = "claude-airou"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform rewrite of the claude-airou desktop pet (macOS first). Shares all on-disk formats with the Swift app."
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+png = "0.17"
+dirs = "5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# Overlay UI (macOS first; the same crates carry the future Windows/Linux ports).
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = "0.30"
+softbuffer = "0.4"
+tray-icon = "0.19"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSApplication", "NSResponder", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
