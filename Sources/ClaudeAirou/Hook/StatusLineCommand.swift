@@ -1,6 +1,6 @@
 import Foundation
 
-/// `claude-pet statusline` — installed as the Claude Code `statusLine` command. Records the usage
+/// `claude-airou statusline` — installed as the Claude Code `statusLine` command. Records the usage
 /// figures Claude Code hands to the status line (context window, rate limits, cost) for the pet's
 /// battery gauge, then runs whatever status line the user had before, with the same stdin, so the
 /// terminal status line looks exactly as it did.
@@ -10,7 +10,7 @@ enum StatusLineCommand {
 
     static func run(arguments: [String], stateStore: SessionStateStore = SessionStateStore()) -> Int32 {
         if isatty(FileHandle.standardInput.fileDescriptor) != 0 {
-            StandardError.print("claude-pet statusline: expects the Claude Code status line JSON on stdin (see `claude-pet install-statusline`).")
+            StandardError.print("claude-airou statusline: expects the Claude Code status line JSON on stdin (see `claude-airou install-statusline`).")
             return 0
         }
         let inputData = FileHandle.standardInput.readDataToEndOfFile()
@@ -109,7 +109,7 @@ enum StatusLineCommand {
         do {
             try process.run()
         } catch {
-            StandardError.print("claude-pet statusline: could not run passthrough: \(error.localizedDescription)")
+            StandardError.print("claude-airou statusline: could not run passthrough: \(error.localizedDescription)")
             return 0
         }
         stdinPipe.fileHandleForWriting.write(inputData)

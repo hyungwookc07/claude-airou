@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Wires everything together for `claude-pet run`: config, pet library, view model, overlay panel, menu bar item.
+/// Wires everything together for `claude-airou run`: config, pet library, view model, overlay panel, menu bar item.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = AppConfig.load()
@@ -16,12 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         guard let selectedPet = library.resolveSelectedPet(preferredId: config.selectedPetId) else {
-            StandardError.print("claude-pet: no valid pets found (built-ins failed to load). Exiting.")
+            StandardError.print("claude-airou: no valid pets found (built-ins failed to load). Exiting.")
             NSApp.terminate(nil)
             return
         }
         for problem in library.loadProblems {
-            StandardError.print("claude-pet: skipping user pet — \(problem)")
+            StandardError.print("claude-airou: skipping user pet — \(problem)")
         }
 
         viewModel = PetViewModel(
@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         configSaveTimer = timer
     }
 
-    // MARK: - Snapshot requests (`claude-pet snapshot`)
+    // MARK: - Snapshot requests (`claude-airou snapshot`)
 
     private var snapshotTimer: Timer?
 
@@ -129,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try panel.writeSnapshot(to: AppPaths.snapshotImageFile)
         } catch {
-            StandardError.print("claude-pet: snapshot failed: \(error.localizedDescription)")
+            StandardError.print("claude-airou: snapshot failed: \(error.localizedDescription)")
         }
     }
 
@@ -138,9 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setUpStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "Claude Pet")
+            button.image = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "Claude Airou")
             button.image?.isTemplate = true
-            button.toolTip = "Claude Pet"
+            button.toolTip = "Claude Airou"
         }
         let menu = NSMenu()
         menu.delegate = self
@@ -273,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(makeItem("Install Claude Code hooks…", action: #selector(installHooks)))
         menu.addItem(makeItem("Open hook log", action: #selector(openHookLog)))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Quit Claude Pet", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(makeItem("Quit Claude Airou", action: #selector(quit), keyEquivalent: "q"))
     }
 
     private func makeItem(_ title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {
@@ -307,7 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             viewModel.select(pet: fallback.definition)
         }
         for problem in library.loadProblems {
-            StandardError.print("claude-pet: skipping user pet — \(problem)")
+            StandardError.print("claude-airou: skipping user pet — \(problem)")
         }
     }
 
@@ -336,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         do {
             let report = try StatusLineInstaller().install()
-            alert.messageText = "Status line wired to claude-pet"
+            alert.messageText = "Status line wired to claude-airou"
             alert.informativeText = report.summaryText + "\n\nNew Claude Code sessions feed the gauge; your own status line keeps rendering."
         } catch {
             alert.alertStyle = .warning
@@ -413,7 +413,7 @@ enum OverlayApp {
     @MainActor
     static func run() -> Never {
         guard SingleInstanceLock.acquire() else {
-            StandardError.print("claude-pet: the overlay is already running (lock: \(AppPaths.overlayLockFile.path)). Nothing to do.")
+            StandardError.print("claude-airou: the overlay is already running (lock: \(AppPaths.overlayLockFile.path)). Nothing to do.")
             exit(0)
         }
         let application = NSApplication.shared
@@ -424,7 +424,7 @@ enum OverlayApp {
     }
 }
 
-/// One overlay per user: a second `claude-pet run` (double-click, LaunchAgent + manual start)
+/// One overlay per user: a second `claude-airou run` (double-click, LaunchAgent + manual start)
 /// exits immediately instead of stacking pets. Uses `flock`, so the lock vanishes with the process.
 enum SingleInstanceLock {
     private static var lockFileDescriptor: Int32 = -1

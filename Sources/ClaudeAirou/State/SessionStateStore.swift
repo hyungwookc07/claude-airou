@@ -1,7 +1,7 @@
 import Foundation
 
 /// File-based state exchange between the hook process (writer) and the overlay app (reader).
-/// One JSON file per Claude Code session under `~/.claude-pet/state/`.
+/// One JSON file per Claude Code session under `~/.claude-airou/state/`.
 /// Files are the transport on purpose: the hook must never block or fail, and the overlay
 /// may not even be running when a hook fires.
 struct SessionStateStore {

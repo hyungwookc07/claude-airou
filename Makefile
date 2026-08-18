@@ -1,28 +1,35 @@
 PREFIX     ?= $(HOME)/.local
 BIN_DIR    := $(PREFIX)/bin
-BINARY     := .build/release/claude-pet
+BINARY     := .build/release/claude-airou
 SKILL_DIR  := $(HOME)/.claude/skills/hatch-pet
-LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
+LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-airou.overlay.plist
+# Pre-rename artefacts (the project used to be "claude-pet"); cleaned up by install/uninstall.
+LEGACY_LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
+LEGACY_BINARY := $(BIN_DIR)/claude-pet
 
 .PHONY: build install hooks statusline skill uninstall run demo render-all autostart no-autostart clean
 
-## Build a release binary (.build/release/claude-pet)
+## Build a release binary (.build/release/claude-airou)
 build:
 	swift build -c release
 
-## Copy the binary to ~/.local/bin/claude-pet
+## Copy the binary to ~/.local/bin/claude-airou
 install: build
 	mkdir -p $(BIN_DIR)
-	install -m 755 $(BINARY) $(BIN_DIR)/claude-pet
-	@echo "installed $(BIN_DIR)/claude-pet"
+	install -m 755 $(BINARY) $(BIN_DIR)/claude-airou
+	@if [ -f $(LEGACY_LAUNCH_AGENT) ]; then \
+		launchctl bootout gui/$$(id -u) $(LEGACY_LAUNCH_AGENT) 2>/dev/null; rm -f $(LEGACY_LAUNCH_AGENT); \
+		echo "removed legacy launch agent dev.claude-pet.overlay"; fi
+	@if [ -f $(LEGACY_BINARY) ]; then rm -f $(LEGACY_BINARY); echo "removed legacy $(LEGACY_BINARY)"; fi
+	@echo "installed $(BIN_DIR)/claude-airou"
 
 ## Register the hook in ~/.claude/settings.json (backup is written first)
 hooks: install
-	$(BIN_DIR)/claude-pet install-hooks
+	$(BIN_DIR)/claude-airou install-hooks
 
 ## Feed the usage gauge from the Claude Code status line (your own status line keeps running)
 statusline: install
-	$(BIN_DIR)/claude-pet install-statusline
+	$(BIN_DIR)/claude-airou install-statusline
 
 ## Install the /hatch-pet skill for Claude Code (~/.claude/skills/hatch-pet)
 skill:
@@ -30,12 +37,13 @@ skill:
 	cp skills/hatch-pet/SKILL.md $(SKILL_DIR)/SKILL.md
 	@echo "installed $(SKILL_DIR)/SKILL.md"
 
-## Remove hooks, binary, skill and launch agent (keeps ~/.claude-pet)
+## Remove hooks, binary, skill and launch agent (keeps ~/.claude-airou)
 uninstall:
-	-$(BIN_DIR)/claude-pet uninstall-hooks
-	-$(BIN_DIR)/claude-pet uninstall-statusline
+	-$(BIN_DIR)/claude-airou uninstall-hooks
+	-$(BIN_DIR)/claude-airou uninstall-statusline
 	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
-	rm -f $(LAUNCH_AGENT) $(BIN_DIR)/claude-pet
+	-launchctl bootout gui/$$(id -u) $(LEGACY_LAUNCH_AGENT) 2>/dev/null
+	rm -f $(LAUNCH_AGENT) $(LEGACY_LAUNCH_AGENT) $(BIN_DIR)/claude-airou $(LEGACY_BINARY)
 	rm -rf $(SKILL_DIR)
 
 ## Run the overlay from the build directory
@@ -48,7 +56,7 @@ demo: build
 
 ## Render every built-in pet to render/<id>/sheet.png
 render-all: build
-	@for f in Sources/ClaudePet/Resources/pets/*.json; do \
+	@for f in Sources/ClaudeAirou/Resources/pets/*.json; do \
 		$(BINARY) render $$f --out render/$$(basename $$f .json) --scale 10; \
 	done
 
@@ -59,8 +67,8 @@ autostart: install
 	  '<?xml version="1.0" encoding="UTF-8"?>' \
 	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
 	  '<plist version="1.0"><dict>' \
-	  '  <key>Label</key><string>dev.claude-pet.overlay</string>' \
-	  '  <key>ProgramArguments</key><array><string>$(BIN_DIR)/claude-pet</string><string>run</string></array>' \
+	  '  <key>Label</key><string>dev.claude-airou.overlay</string>' \
+	  '  <key>ProgramArguments</key><array><string>$(BIN_DIR)/claude-airou</string><string>run</string></array>' \
 	  '  <key>RunAtLoad</key><true/>' \
 	  '  <key>KeepAlive</key><false/>' \
 	  '</dict></plist>' > $(LAUNCH_AGENT)

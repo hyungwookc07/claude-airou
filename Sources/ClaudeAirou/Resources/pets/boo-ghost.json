@@ -3,7 +3,7 @@
   "name": "Boo",
   "species": "ghost",
   "description": "A friendly little ghost who haunts your terminal and drifts through every stack trace.",
-  "author": "claude-pet",
+  "author": "claude-airou",
   "fps": 3,
   "palette": {
     "k": "#2f2a45",

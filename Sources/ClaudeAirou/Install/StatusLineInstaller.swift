@@ -1,7 +1,7 @@
 import Foundation
 
-/// Swaps `settings.statusLine` for `claude-pet statusline`, keeping the user's original status line
-/// object in `~/.claude-pet/statusline-passthrough.json` so it keeps running (and can be restored).
+/// Swaps `settings.statusLine` for `claude-airou statusline`, keeping the user's original status line
+/// object in `~/.claude-airou/statusline-passthrough.json` so it keeps running (and can be restored).
 struct StatusLineInstaller {
     struct Report {
         var settingsPath: String
@@ -38,7 +38,7 @@ struct StatusLineInstaller {
 
     static func isOurs(_ statusLine: [String: Any]) -> Bool {
         guard let command = statusLine["command"] as? String else { return false }
-        return command.contains(HooksInstaller.commandMarker) && command.trimmingCharacters(in: .whitespaces).hasSuffix(" " + subcommand)
+        return HooksInstaller.containsOurMarker(command) && command.trimmingCharacters(in: .whitespaces).hasSuffix(" " + subcommand)
     }
 
     // MARK: - Install
@@ -85,7 +85,7 @@ struct StatusLineInstaller {
         var settings = try loadSettings()
         var report = Report(settingsPath: settingsURL.path, action: "")
         guard let existing = settings["statusLine"] as? [String: Any], Self.isOurs(existing) else {
-            report.action = "nothing to do (status line is not claude-pet's)"
+            report.action = "nothing to do (status line is not claude-airou's)"
             return report
         }
         if let original = StatusLineCommand.storedPassthroughObject(), !original.isEmpty {
@@ -124,7 +124,7 @@ struct StatusLineInstaller {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let baseName = "\(settingsURL.lastPathComponent).claude-pet-backup-\(formatter.string(from: Date()))"
+        let baseName = "\(settingsURL.lastPathComponent).claude-airou-backup-\(formatter.string(from: Date()))"
         let directory = settingsURL.deletingLastPathComponent()
         var backupURL = directory.appendingPathComponent(baseName)
         var suffix = 1

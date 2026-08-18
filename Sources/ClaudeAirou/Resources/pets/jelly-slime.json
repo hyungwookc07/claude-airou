@@ -3,7 +3,7 @@
   "name": "Jelly",
   "species": "slime",
   "description": "A see-through teal slime who absorbs stack traces and wobbles them off.",
-  "author": "claude-pet",
+  "author": "claude-airou",
   "fps": 3,
   "palette": {
     "k": "#17403a",

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Usage figures for one session, fed by the Claude Code status line (`claude-pet statusline`)
+/// Usage figures for one session, fed by the Claude Code status line (`claude-airou statusline`)
 /// or, when no status line runs (e.g. some desktop-app sessions), estimated from the transcript by
 /// the hook. Stored next to the state file as `<session>.usage.json`.
 struct SessionUsageSnapshot: Codable, Equatable {

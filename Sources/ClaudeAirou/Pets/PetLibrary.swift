@@ -21,14 +21,14 @@ enum BuiltInPets {
                 try definition.validate()
                 return definition
             } catch {
-                StandardError.print("claude-pet: built-in pet \(entry.fileName) is invalid: \(error.localizedDescription)")
+                StandardError.print("claude-airou: built-in pet \(entry.fileName) is invalid: \(error.localizedDescription)")
                 return nil
             }
         }
     }
 }
 
-/// Every pet available to the overlay: built-ins first, then `~/.claude-pet/pets/*.json`.
+/// Every pet available to the overlay: built-ins first, then `~/.claude-airou/pets/*.json`.
 /// A user pet with the same id as a built-in overrides it.
 struct PetLibrary {
     struct LoadedPet: Equatable {

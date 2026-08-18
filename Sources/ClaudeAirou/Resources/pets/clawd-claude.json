@@ -3,7 +3,7 @@
   "name": "Clawd",
   "species": "claude",
   "description": "The little orange creature from the Claude Code welcome screen, now supervising from your desktop.",
-  "author": "claude-pet",
+  "author": "claude-airou",
   "fps": 3,
   "palette": {
     "o": "#D97757",

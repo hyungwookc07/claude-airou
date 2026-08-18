@@ -1,6 +1,6 @@
 import Foundation
 
-/// Entry point for `claude-pet hook`, registered in `~/.claude/settings.json` for every event.
+/// Entry point for `claude-airou hook`, registered in `~/.claude/settings.json` for every event.
 ///
 /// Contract with Claude Code:
 ///  - never write to stdout (UserPromptSubmit / SessionStart stdout is injected into the model context)
@@ -11,7 +11,7 @@ enum HookCommand {
 
     static func run(stateStore: SessionStateStore = SessionStateStore()) -> Int32 {
         if isatty(FileHandle.standardInput.fileDescriptor) != 0 {
-            StandardError.print("claude-pet hook: expects Claude Code hook JSON on stdin (see `claude-pet install-hooks`).")
+            StandardError.print("claude-airou hook: expects Claude Code hook JSON on stdin (see `claude-airou install-hooks`).")
             return 0
         }
 
@@ -75,7 +75,7 @@ enum HookCommand {
         return formatter
     }()
 
-    /// Appends one line to `~/.claude-pet/hook.log`, truncating the file when it grows past `hookLogMaxBytes`.
+    /// Appends one line to `~/.claude-airou/hook.log`, truncating the file when it grows past `hookLogMaxBytes`.
     static func appendLog(_ line: String) {
         let logURL = AppPaths.hookLogFile
         do {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// User preferences persisted at `~/.claude-pet/config.json`.
+/// User preferences persisted at `~/.claude-airou/config.json`.
 struct AppConfig: Codable, Equatable {
     static let defaultPixelScale: Double = 5
     static let minimumPixelScale: Double = 1
@@ -55,7 +55,7 @@ struct AppConfig: Codable, Equatable {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(self).write(to: url, options: .atomic)
         } catch {
-            StandardError.print("claude-pet: could not save config: \(error.localizedDescription)")
+            StandardError.print("claude-airou: could not save config: \(error.localizedDescription)")
         }
     }
 }

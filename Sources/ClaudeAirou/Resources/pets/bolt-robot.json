@@ -3,7 +3,7 @@
   "name": "Bolt",
   "species": "robot",
   "description": "A boxy little robot with a screen for a face and an antenna light that reports on your build.",
-  "author": "claude-pet",
+  "author": "claude-airou",
   "fps": 3,
   "palette": {
     "k": "#262a33",

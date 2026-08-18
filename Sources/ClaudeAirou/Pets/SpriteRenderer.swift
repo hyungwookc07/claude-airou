@@ -3,8 +3,8 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Renders pet frames to PNG (for `claude-pet render`, used to eyeball pixel art while designing pets)
-/// and to ASCII (for `claude-pet preview`). The live overlay draws with SwiftUI instead.
+/// Renders pet frames to PNG (for `claude-airou render`, used to eyeball pixel art while designing pets)
+/// and to ASCII (for `claude-airou preview`). The live overlay draws with SwiftUI instead.
 enum SpriteRenderer {
     struct RenderError: LocalizedError {
         let message: String

@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "claude-pet",
+    name: "claude-airou",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "claude-pet",
-            path: "Sources/ClaudePet",
+            name: "claude-airou",
+            path: "Sources/ClaudeAirou",
             resources: [
                 .embedInCode("Resources/pets/mochi-cat.json"),
                 .embedInCode("Resources/pets/quackers-duck.json"),

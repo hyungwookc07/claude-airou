@@ -5,42 +5,42 @@ enum CommandLineInterface {
     static let version = "0.1.0"
 
     static let usageText = """
-    claude-pet — a Codex-style desktop pet for Claude Code (macOS)
+    claude-airou — a Codex-style desktop pet for Claude Code (macOS)
 
     USAGE
-      claude-pet                       Run the overlay (menu bar icon + floating pet)
-      claude-pet run                   Same as above
-      claude-pet hook                  Claude Code hook entry point (reads hook JSON on stdin)
-      claude-pet install-hooks [--print] [--settings PATH]
+      claude-airou                       Run the overlay (menu bar icon + floating pet)
+      claude-airou run                   Same as above
+      claude-airou hook                  Claude Code hook entry point (reads hook JSON on stdin)
+      claude-airou install-hooks [--print] [--settings PATH]
                                        Merge hook entries into ~/.claude/settings.json (backup first)
                                        --print only prints the JSON snippet, changes nothing
-      claude-pet uninstall-hooks [--settings PATH]
-      claude-pet install-statusline [--settings PATH]
+      claude-airou uninstall-hooks [--settings PATH]
+      claude-airou install-statusline [--settings PATH]
                                        Feed the usage gauge from the Claude Code status line; your
                                        existing status line keeps running (passthrough)
-      claude-pet uninstall-statusline  Restore the original status line
-      claude-pet statusline            Status line entry point (reads the status line JSON on stdin)
-      claude-pet simulate STATE [--message TEXT] [--session ID] [--cwd PATH]
+      claude-airou uninstall-statusline  Restore the original status line
+      claude-airou statusline            Status line entry point (reads the status line JSON on stdin)
+      claude-airou simulate STATE [--message TEXT] [--session ID] [--cwd PATH]
                                        Write a fake session so you can see the pet react
                                        STATE: \(PetState.allCases.map(\.rawValue).joined(separator: " | ")) | clear | demo
-      claude-pet pets                  List available pets (built-in + ~/.claude-pet/pets)
-      claude-pet validate FILE.json    Validate a pet JSON file
-      claude-pet render PET_ID|FILE [--out DIR] [--scale N] [--bg #RRGGBB]
+      claude-airou pets                  List available pets (built-in + ~/.claude-airou/pets)
+      claude-airou validate FILE.json    Validate a pet JSON file
+      claude-airou render PET_ID|FILE [--out DIR] [--scale N] [--bg #RRGGBB]
                                        Render every frame to PNG (+ sheet.png) to eyeball pixel art
-      claude-pet preview PET_ID|FILE [--state STATE] [--solid]
+      claude-airou preview PET_ID|FILE [--state STATE] [--solid]
                                        Print frames as ASCII
-      claude-pet status                Print the sessions the overlay currently sees
-      claude-pet snapshot [--out FILE.png]
+      claude-airou status                Print the sessions the overlay currently sees
+      claude-airou snapshot [--out FILE.png]
                                        Ask the running overlay to save a PNG of itself
-      claude-pet click [primary|X]     Click the running overlay (primary pet, or x in points) — for testing
-      claude-pet help
+      claude-airou click [primary|X]     Click the running overlay (primary pet, or x in points) — for testing
+      claude-airou help
 
     FILES
-      ~/.claude-pet/config.json        preferences (pet, size, position)
-      ~/.claude-pet/pets/*.json        your custom pets (see skills/hatch-pet)
-      ~/.claude-pet/state/*.json       live session state written by the hook
-      ~/.claude-pet/hook.log           what the hook saw (auto-truncated)
-      ~/.claude-pet/statusline-passthrough.json   your original statusLine while claude-pet's is installed
+      ~/.claude-airou/config.json        preferences (pet, size, position)
+      ~/.claude-airou/pets/*.json        your custom pets (see skills/hatch-pet)
+      ~/.claude-airou/state/*.json       live session state written by the hook
+      ~/.claude-airou/hook.log           what the hook saw (auto-truncated)
+      ~/.claude-airou/statusline-passthrough.json   your original statusLine while claude-airou's is installed
     """
 
     struct ParsedArguments {
@@ -93,7 +93,7 @@ enum CommandLineInterface {
             return 0
         }
         if parsed.hasFlag("version") {
-            print("claude-pet \(version)")
+            print("claude-airou \(version)")
             return 0
         }
         let command = parsed.positional.first ?? "run"
@@ -134,10 +134,10 @@ enum CommandLineInterface {
             print(usageText)
             return 0
         case "version":
-            print("claude-pet \(version)")
+            print("claude-airou \(version)")
             return 0
         default:
-            StandardError.print("claude-pet: unknown command \"\(command)\"\n")
+            StandardError.print("claude-airou: unknown command \"\(command)\"\n")
             StandardError.print(usageText)
             return 2
         }
@@ -165,7 +165,7 @@ enum CommandLineInterface {
             print("\nRestart running Claude Code sessions (or start a new one) for hooks to take effect.")
             return 0
         } catch {
-            StandardError.print("claude-pet: install failed: \(error.localizedDescription)")
+            StandardError.print("claude-airou: install failed: \(error.localizedDescription)")
             return 1
         }
     }
@@ -174,12 +174,12 @@ enum CommandLineInterface {
         let installer = StatusLineInstaller(settingsURL: settingsURL(from: parsed))
         do {
             let report = try installer.install()
-            print("Claude Code status line wired to claude-pet.")
+            print("Claude Code status line wired to claude-airou.")
             print(report.summaryText)
             print("\nNew Claude Code sessions will feed the usage gauge; your own status line keeps rendering through the passthrough.")
             return 0
         } catch {
-            StandardError.print("claude-pet: install-statusline failed: \(error.localizedDescription)")
+            StandardError.print("claude-airou: install-statusline failed: \(error.localizedDescription)")
             return 1
         }
     }
@@ -191,7 +191,7 @@ enum CommandLineInterface {
             print(report.summaryText)
             return 0
         } catch {
-            StandardError.print("claude-pet: uninstall-statusline failed: \(error.localizedDescription)")
+            StandardError.print("claude-airou: uninstall-statusline failed: \(error.localizedDescription)")
             return 1
         }
     }
@@ -204,14 +204,14 @@ enum CommandLineInterface {
             print(report.summaryText)
             return 0
         } catch {
-            StandardError.print("claude-pet: uninstall failed: \(error.localizedDescription)")
+            StandardError.print("claude-airou: uninstall failed: \(error.localizedDescription)")
             return 1
         }
     }
 
     private static func runSimulate(_ positional: [String], _ parsed: ParsedArguments) -> Int32 {
         guard let stateText = positional.first else {
-            StandardError.print("claude-pet simulate: missing STATE (\(PetState.allCases.map(\.rawValue).joined(separator: " | ")) | clear | demo)")
+            StandardError.print("claude-airou simulate: missing STATE (\(PetState.allCases.map(\.rawValue).joined(separator: " | ")) | clear | demo)")
             return 2
         }
         let store = SessionStateStore()
@@ -238,7 +238,7 @@ enum CommandLineInterface {
                 try store.write(snapshot)
                 print("\(state.rawValue): \(message)")
             } catch {
-                StandardError.print("claude-pet simulate: \(error.localizedDescription)")
+                StandardError.print("claude-airou simulate: \(error.localizedDescription)")
             }
         }
 
@@ -266,7 +266,7 @@ enum CommandLineInterface {
         }
 
         guard let state = PetState.parse(stateText) else {
-            StandardError.print("claude-pet simulate: unknown state \"\(stateText)\"")
+            StandardError.print("claude-airou simulate: unknown state \"\(stateText)\"")
             return 2
         }
         let message = parsed.option("message") ?? defaultMessage(for: state)
@@ -316,7 +316,7 @@ enum CommandLineInterface {
 
     private static func runValidate(_ positional: [String]) -> Int32 {
         guard let path = positional.first else {
-            StandardError.print("claude-pet validate: missing FILE.json")
+            StandardError.print("claude-airou validate: missing FILE.json")
             return 2
         }
         do {
@@ -354,7 +354,7 @@ enum CommandLineInterface {
 
     private static func runRender(_ positional: [String], _ parsed: ParsedArguments) -> Int32 {
         guard let reference = positional.first else {
-            StandardError.print("claude-pet render: missing PET_ID or FILE")
+            StandardError.print("claude-airou render: missing PET_ID or FILE")
             return 2
         }
         do {
@@ -363,7 +363,7 @@ enum CommandLineInterface {
             var scale = 8
             if let scaleText = parsed.option("scale") {
                 guard let parsedScale = Int(scaleText), (1...64).contains(parsedScale) else {
-                    StandardError.print("claude-pet render: --scale must be an integer between 1 and 64 (got \"\(scaleText)\")")
+                    StandardError.print("claude-airou render: --scale must be an integer between 1 and 64 (got \"\(scaleText)\")")
                     return 2
                 }
                 scale = parsedScale
@@ -371,7 +371,7 @@ enum CommandLineInterface {
             var background: PixelColor?
             if let backgroundText = parsed.option("bg") {
                 guard let parsedBackground = PixelColor(hex: backgroundText) else {
-                    StandardError.print("claude-pet render: --bg must be #RRGGBB or #RRGGBBAA (got \"\(backgroundText)\")")
+                    StandardError.print("claude-airou render: --bg must be #RRGGBB or #RRGGBBAA (got \"\(backgroundText)\")")
                     return 2
                 }
                 background = parsedBackground
@@ -382,14 +382,14 @@ enum CommandLineInterface {
             print("Contact sheet: \(outputDirectory.appendingPathComponent("sheet.png").path)")
             return 0
         } catch {
-            StandardError.print("claude-pet render: \(error.localizedDescription)")
+            StandardError.print("claude-airou render: \(error.localizedDescription)")
             return 1
         }
     }
 
     private static func runPreview(_ positional: [String], _ parsed: ParsedArguments) -> Int32 {
         guard let reference = positional.first else {
-            StandardError.print("claude-pet preview: missing PET_ID or FILE")
+            StandardError.print("claude-airou preview: missing PET_ID or FILE")
             return 2
         }
         do {
@@ -397,7 +397,7 @@ enum CommandLineInterface {
             let states: [PetState]
             if let stateText = parsed.option("state") {
                 guard let state = PetState.parse(stateText) else {
-                    StandardError.print("claude-pet preview: unknown state \"\(stateText)\"")
+                    StandardError.print("claude-airou preview: unknown state \"\(stateText)\"")
                     return 2
                 }
                 states = [state]
@@ -414,7 +414,7 @@ enum CommandLineInterface {
             }
             return 0
         } catch {
-            StandardError.print("claude-pet preview: \(error.localizedDescription)")
+            StandardError.print("claude-airou preview: \(error.localizedDescription)")
             return 1
         }
     }
@@ -426,7 +426,7 @@ enum CommandLineInterface {
             // `--out ~/Desktop` means "put snapshot.png in there", never "replace that directory".
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
-                outputPath = (path as NSString).appendingPathComponent("claude-pet-snapshot.png")
+                outputPath = (path as NSString).appendingPathComponent("claude-airou-snapshot.png")
             }
         }
         let imageURL = AppPaths.snapshotImageFile
@@ -435,7 +435,7 @@ enum CommandLineInterface {
             try? FileManager.default.removeItem(at: imageURL)
             try Data().write(to: AppPaths.snapshotRequestFile)
         } catch {
-            StandardError.print("claude-pet snapshot: \(error.localizedDescription)")
+            StandardError.print("claude-airou snapshot: \(error.localizedDescription)")
             return 1
         }
         let deadline = Date().addingTimeInterval(5)
@@ -447,7 +447,7 @@ enum CommandLineInterface {
                         try data.write(to: URL(fileURLWithPath: outputPath), options: .atomic) // overwrites a file, never a directory
                         print(outputPath)
                     } catch {
-                        StandardError.print("claude-pet snapshot: could not copy to \(outputPath): \(error.localizedDescription)")
+                        StandardError.print("claude-airou snapshot: could not copy to \(outputPath): \(error.localizedDescription)")
                         return 1
                     }
                 } else {
@@ -458,11 +458,11 @@ enum CommandLineInterface {
             Thread.sleep(forTimeInterval: 0.1)
         }
         try? FileManager.default.removeItem(at: AppPaths.snapshotRequestFile)
-        StandardError.print("claude-pet snapshot: no answer from the overlay — is `claude-pet run` running?")
+        StandardError.print("claude-airou snapshot: no answer from the overlay — is `claude-airou run` running?")
         return 1
     }
 
-    /// Scripted click on the running overlay: `claude-pet click primary` or `claude-pet click 42` (x in points).
+    /// Scripted click on the running overlay: `claude-airou click primary` or `claude-airou click 42` (x in points).
     private static func runClick(_ positional: [String]) -> Int32 {
         let target = positional.first ?? "primary"
         do {
@@ -470,7 +470,7 @@ enum CommandLineInterface {
             try Data(target.utf8).write(to: AppPaths.clickRequestFile, options: .atomic)
             return 0
         } catch {
-            StandardError.print("claude-pet click: \(error.localizedDescription)")
+            StandardError.print("claude-airou click: \(error.localizedDescription)")
             return 1
         }
     }

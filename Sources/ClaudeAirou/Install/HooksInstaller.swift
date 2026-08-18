@@ -1,6 +1,6 @@
 import Foundation
 
-/// Adds/removes the `claude-pet hook` entries in `~/.claude/settings.json`.
+/// Adds/removes the `claude-airou hook` entries in `~/.claude/settings.json`.
 ///
 /// The merge is conservative: only the `hooks` object is touched, existing entries for other
 /// tools are left alone, a timestamped backup is written first, and the operation is idempotent
@@ -34,7 +34,13 @@ struct HooksInstaller {
     }
 
     /// Marker used to recognise our own entries regardless of where the binary lives.
-    static let commandMarker = "claude-pet"
+    static let commandMarker = "claude-airou"
+    /// Entries written before the rename; recognised so install updates them and uninstall removes them.
+    static let legacyCommandMarkers = ["claude-pet"]
+
+    static func containsOurMarker(_ text: String) -> Bool {
+        text.contains(commandMarker) || legacyCommandMarkers.contains { text.contains($0) }
+    }
     static let hookSubcommand = "hook"
     static let hookTimeoutSeconds = 10
 
@@ -57,7 +63,7 @@ struct HooksInstaller {
     }
 
     /// Absolute path of this binary as invoked. Symlinks are kept on purpose: if the user
-    /// installed `~/.local/bin/claude-pet -> <build dir>`, the symlink is the stable address.
+    /// installed `~/.local/bin/claude-airou -> <build dir>`, the symlink is the stable address.
     static func currentExecutablePath() -> String {
         let rawPath = Bundle.main.executablePath ?? CommandLine.arguments[0]
         return URL(fileURLWithPath: rawPath).standardizedFileURL.path
@@ -165,15 +171,16 @@ struct HooksInstaller {
     }
 
     /// Recognises our own entries regardless of where the binary lives:
-    /// shell form `'.../claude-pet' hook` (what we write) or exec form `command: ".../claude-pet", args: ["hook"]`.
+    /// shell form `'.../claude-airou' hook` (what we write) or exec form `command: ".../claude-airou", args: ["hook"]`.
     static func isOurHandler(_ handler: [String: Any]) -> Bool {
         guard handler["type"] as? String == "command",
               let command = handler["command"] as? String else { return false }
         let trimmed = command.trimmingCharacters(in: .whitespaces)
-        guard trimmed.contains(commandMarker) else { return false }
+        guard containsOurMarker(trimmed) else { return false }
         if trimmed.hasSuffix(" " + hookSubcommand) { return true }
         if let args = handler["args"] as? [String], args == [hookSubcommand] {
-            return trimmed.hasSuffix(commandMarker) || trimmed.hasSuffix(commandMarker + "'") || trimmed.hasSuffix(commandMarker + "\"")
+            let markers = [commandMarker] + legacyCommandMarkers
+            return markers.contains { trimmed.hasSuffix($0) || trimmed.hasSuffix($0 + "'") || trimmed.hasSuffix($0 + "\"") }
         }
         return false
     }
@@ -217,7 +224,7 @@ struct HooksInstaller {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let baseName = "\(settingsURL.lastPathComponent).claude-pet-backup-\(formatter.string(from: Date()))"
+        let baseName = "\(settingsURL.lastPathComponent).claude-airou-backup-\(formatter.string(from: Date()))"
         let directory = settingsURL.deletingLastPathComponent()
         var backupURL = directory.appendingPathComponent(baseName)
         var suffix = 1
@@ -238,7 +245,7 @@ struct HooksInstaller {
         try (data + Data("\n".utf8)).write(to: settingsURL, options: .atomic)
     }
 
-    /// The JSON a user would paste by hand (printed by `claude-pet install-hooks --print`).
+    /// The JSON a user would paste by hand (printed by `claude-airou install-hooks --print`).
     func snippetJSON() -> String {
         var hooks: [String: Any] = [:]
         for eventName in HookEventMapper.subscribedEventNames {
