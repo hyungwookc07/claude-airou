@@ -33,6 +33,11 @@ const COMMAND_MARKER: &str = "claude-airou";
 /// Entries written before the rename; recognised so install updates them and uninstall removes them.
 const LEGACY_COMMAND_MARKERS: [&str; 1] = ["claude-pet"];
 const HOOK_SUBCOMMAND: &str = "hook";
+/// Claude Code gained the hook `args` field (exec form) in 2.1.139 (2026-05-11). Older
+/// versions ignore `args` and run `command` through a shell — which for us would mean the
+/// bare binary with no subcommand, i.e. the overlay instead of the hook, failing silently.
+/// So we write exec form only when the installed CLI is new enough.
+const EXEC_FORM_MINIMUM_CLAUDE_VERSION: (u32, u32, u32) = (2, 1, 139);
 const HOOK_TIMEOUT_SECONDS: i64 = 10;
 const STATUSLINE_SUBCOMMAND: &str = "statusline";
 const MCP_SERVER_KEY: &str = "claude-airou";
@@ -56,6 +61,33 @@ impl fmt::Display for InstallError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
     }
+}
+
+/// `major.minor.patch` out of `claude --version` ("2.1.223 (Claude Code)"), or None when
+/// the CLI is missing (desktop-app-only users) or prints something unexpected.
+fn installed_claude_code_version() -> Option<(u32, u32, u32)> {
+    let output = std::process::Command::new("claude").arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_semantic_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_semantic_version(text: &str) -> Option<(u32, u32, u32)> {
+    let token = text.split_whitespace().find(|word| {
+        let mut parts = word.split('.');
+        (0..3).all(|_| parts.next().is_some_and(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())))
+            && parts.next().is_none()
+    })?;
+    let mut parts = token.split('.').map(|part| part.parse::<u32>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
+/// Exec form needs no shell, so quoting stops mattering — the reason Windows needs it:
+/// there hooks run through PowerShell when Git Bash is absent, and PowerShell does not
+/// execute a single-quoted path without the call operator.
+fn should_write_exec_form_hooks() -> bool {
+    installed_claude_code_version().is_some_and(|version| version >= EXEC_FORM_MINIMUM_CLAUDE_VERSION)
 }
 
 fn contains_our_marker(text: &str) -> bool {
@@ -241,6 +273,8 @@ impl HooksReport {
 struct HooksInstaller {
     settings_path: PathBuf,
     executable_path: String,
+    /// Write `command` + `args` (no shell) instead of a single-quoted shell string.
+    uses_exec_form: bool,
 }
 
 impl HooksInstaller {
@@ -248,7 +282,15 @@ impl HooksInstaller {
         HooksInstaller {
             settings_path,
             executable_path: current_executable_path(),
+            uses_exec_form: should_write_exec_form_hooks(),
         }
+    }
+
+    /// Overrides the auto-detected form (`--hook-format exec|shell`), for users whose
+    /// `claude` is not on PATH and for reproducing either shape in a bug report.
+    fn with_form(mut self, uses_exec_form: bool) -> HooksInstaller {
+        self.uses_exec_form = uses_exec_form;
+        self
     }
 
     #[cfg(test)]
@@ -256,6 +298,7 @@ impl HooksInstaller {
         HooksInstaller {
             settings_path,
             executable_path: executable_path.to_string(),
+            uses_exec_form: false,
         }
     }
 
@@ -268,10 +311,28 @@ impl HooksInstaller {
         format!("{} {HOOK_SUBCOMMAND}", shell_single_quoted(&self.executable_path))
     }
 
+    /// What the report prints for the entry that was actually written.
+    fn hook_command_display(&self) -> String {
+        if self.uses_exec_form {
+            format!("{} {HOOK_SUBCOMMAND}   (exec form: no shell)", self.executable_path)
+        } else {
+            self.hook_command()
+        }
+    }
+
     fn our_handler(&self) -> Map<String, Value> {
         let mut handler = Map::new();
         handler.insert("type".to_string(), Value::String("command".to_string()));
-        handler.insert("command".to_string(), Value::String(self.hook_command()));
+        if self.uses_exec_form {
+            // No shell: the path is one argument however many spaces or quotes it holds.
+            handler.insert("command".to_string(), Value::String(self.executable_path.clone()));
+            handler.insert(
+                "args".to_string(),
+                Value::Array(vec![Value::String(HOOK_SUBCOMMAND.to_string())]),
+            );
+        } else {
+            handler.insert("command".to_string(), Value::String(self.hook_command()));
+        }
         handler.insert("timeout".to_string(), Value::from(HOOK_TIMEOUT_SECONDS));
         handler
     }
@@ -281,7 +342,7 @@ impl HooksInstaller {
         let mut hooks = self.hooks_object(&settings)?;
         let mut report = HooksReport {
             settings_path: self.settings_path_string(),
-            hook_command: self.hook_command(),
+            hook_command: self.hook_command_display(),
             ..HooksReport::default()
         };
 
@@ -333,7 +394,7 @@ impl HooksInstaller {
         let mut settings = load_json_object(&self.settings_path)?;
         let mut report = HooksReport {
             settings_path: self.settings_path_string(),
-            hook_command: self.hook_command(),
+            hook_command: self.hook_command_display(),
             ..HooksReport::default()
         };
         if !settings.contains_key("hooks") {
@@ -1028,7 +1089,17 @@ pub fn uninstall_mcp_at_default_paths() -> Result<String, String> {
 // MARK: - CLI wrappers (port of the run* helpers in CommandLineInterface.swift)
 
 pub fn run_install_hooks(parsed: &Parsed) -> i32 {
-    let installer = HooksInstaller::new(settings_path_from(parsed));
+    let installer = match parsed.option("hook-format") {
+        Some("exec") => HooksInstaller::new(settings_path_from(parsed)).with_form(true),
+        Some("shell") => HooksInstaller::new(settings_path_from(parsed)).with_form(false),
+        Some(other) => {
+            crate::logging::eprint_line(&format!(
+                "claude-airou: --hook-format must be \"exec\" or \"shell\" (got \"{other}\")"
+            ));
+            return 2;
+        }
+        None => HooksInstaller::new(settings_path_from(parsed)),
+    };
     if parsed.has_flag("print") {
         println!("{}", installer.snippet_json());
         return 0;
@@ -1135,6 +1206,85 @@ mod tests {
     use serde_json::json;
 
     const EXE: &str = "/tmp/fake exe/claude-airou";
+
+    fn exec_form_installer(settings_path: PathBuf) -> HooksInstaller {
+        HooksInstaller::with_executable(settings_path, EXE).with_form(true)
+    }
+
+    #[test]
+    fn parses_the_version_claude_prints() {
+        assert_eq!(parse_semantic_version("2.1.223 (Claude Code)"), Some((2, 1, 223)));
+        assert_eq!(parse_semantic_version("  2.1.139\n"), Some((2, 1, 139)));
+        assert_eq!(parse_semantic_version("Claude Code 10.0.2 (build 7)"), Some((10, 0, 2)));
+        // Nothing version-shaped, or not three numeric parts: we cannot tell, so no exec form.
+        assert_eq!(parse_semantic_version("unknown"), None);
+        assert_eq!(parse_semantic_version("2.1"), None);
+        assert_eq!(parse_semantic_version("2.1.x"), None);
+        assert_eq!(parse_semantic_version("2.1.223.4"), None);
+    }
+
+    #[test]
+    fn exec_form_needs_the_version_that_understands_args() {
+        // Tuple ordering is the comparison used against EXEC_FORM_MINIMUM_CLAUDE_VERSION.
+        assert!((2, 1, 139) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION);
+        assert!((2, 1, 223) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION);
+        assert!((2, 2, 0) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION);
+        assert!((3, 0, 0) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION);
+        assert!(!((2, 1, 138) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION));
+        assert!(!((2, 0, 999) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION));
+        assert!(!((1, 9, 9) >= EXEC_FORM_MINIMUM_CLAUDE_VERSION));
+    }
+
+    #[test]
+    fn exec_form_writes_command_and_args_without_quoting() {
+        let dir = tempdir();
+        let settings = dir.path().join("settings.json");
+        exec_form_installer(settings.clone()).install().unwrap();
+
+        let written: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        let handler = &written["hooks"]["PreToolUse"][0]["hooks"][0];
+        // The path keeps its space and carries no quotes: there is no shell to strip them.
+        assert_eq!(handler["command"], json!(EXE));
+        assert_eq!(handler["args"], json!(["hook"]));
+        assert_eq!(handler["timeout"], json!(10));
+    }
+
+    #[test]
+    fn switching_form_migrates_the_existing_entry_in_place() {
+        let dir = tempdir();
+        let settings = dir.path().join("settings.json");
+
+        // A machine set up before exec form existed.
+        HooksInstaller::with_executable(settings.clone(), EXE).install().unwrap();
+        let shell_form: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(shell_form["hooks"]["Stop"][0]["hooks"][0]["command"], json!("'/tmp/fake exe/claude-airou' hook"));
+        assert!(shell_form["hooks"]["Stop"][0]["hooks"][0].get("args").is_none());
+
+        // Upgrading Claude Code and re-running setup replaces it rather than adding a second.
+        let report = exec_form_installer(settings.clone()).install().unwrap();
+        assert!(report.added_events.is_empty(), "the entry is updated, not duplicated");
+        assert!(!report.updated_events.is_empty());
+
+        let exec_form: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        let handlers = exec_form["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
+        assert_eq!(handlers.len(), 1, "no leftover shell-form entry");
+        assert_eq!(handlers[0]["command"], json!(EXE));
+        assert_eq!(handlers[0]["args"], json!(["hook"]));
+    }
+
+    #[test]
+    fn uninstall_removes_exec_form_entries_too() {
+        let dir = tempdir();
+        let settings = dir.path().join("settings.json");
+        exec_form_installer(settings.clone()).install().unwrap();
+        exec_form_installer(settings.clone()).uninstall().unwrap();
+
+        let written: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+        let leftover = written["hooks"].as_object().map(|hooks| {
+            hooks.values().filter(|value| !value.as_array().map(|a| a.is_empty()).unwrap_or(true)).count()
+        });
+        assert_eq!(leftover.unwrap_or(0), 0, "every exec-form entry is gone");
+    }
 
     fn tempdir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")

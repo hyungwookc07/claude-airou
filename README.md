@@ -91,6 +91,8 @@ Claude Code ──hook event (JSON on stdin)──▶ claude-airou hook ──�
 | `Notification(idle_prompt)` | idle | (Claude finished ~60 s ago — clears a stuck busy state; a done/error result stays) |
 | `SessionEnd` | (session removed) | |
 
+The hook entry itself is written in **exec form** (`command` + `args`, spawned without a shell) when the installed Claude Code is 2.1.139 or newer, and in shell form otherwise — `claude-airou install-hooks --hook-format exec|shell` overrides the choice. Exec form removes quoting from the picture entirely, which matters on Windows: there hooks run through PowerShell when Git Bash is absent, and PowerShell does not execute a single-quoted path without the call operator.
+
 The hook binary never writes to stdout and always exits 0 (Claude Code feeds some events' hook stdout back into the model context). What it saw is logged to `~/.claude-airou/hook.log` (auto-truncated).
 
 Parallel tool calls and subagents fire hooks with the same `session_id`, so the hook merges instead of blindly overwriting: while a session is waiting for approval or an answer, sibling `PostToolUse` events and subagent events are ignored; the wait clears when *that* tool call (`tool_use_id`) finishes, or on `PostToolBatch` / `Stop` / `UserPromptSubmit` (`rust/src/hook_mapper.rs`).

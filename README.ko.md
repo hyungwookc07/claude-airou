@@ -89,6 +89,8 @@ Claude Code ──hook 이벤트(stdin JSON)──▶ claude-airou hook ──�
 | `Notification(idle_prompt)` | idle | (Claude가 응답을 마치고 60초 지남 — 막힌 busy 상태만 정리, done/error 결과는 유지) |
 | `SessionEnd` | (세션 제거) | |
 
+hook 항목 자체는 설치된 Claude Code가 2.1.139 이상이면 **exec 형식**(`command` + `args`, 셸 없이 직접 실행)으로, 그 미만이면 셸 형식으로 기록된다. `claude-airou install-hooks --hook-format exec|shell`로 직접 고를 수도 있다. exec 형식은 인용부호 문제를 아예 없애는데, 윈도우에서 중요하다 — Git Bash가 없으면 hook이 PowerShell로 실행되고, PowerShell은 작은따옴표로 감싼 경로를 호출 연산자 없이 실행하지 못한다.
+
 hook 바이너리는 stdout에 아무것도 쓰지 않고 항상 exit 0 으로 끝난다 (Claude Code는 일부 이벤트의 hook stdout을 모델 컨텍스트에 넣기 때문). 무슨 일이 있었는지는 `~/.claude-airou/hook.log`에 남는다.
 
 병렬 도구 호출·서브에이전트도 같은 `session_id`로 hook을 쏘기 때문에 hook은 단순 덮어쓰기가 아니라 병합한다:
