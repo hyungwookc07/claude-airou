@@ -11,8 +11,8 @@ them freely (e.g. Swift overlay + Rust hook/MCP, or the other way around).
 
 | Area | State |
 |---|---|
-| Core (`hook`, `mcp`, `statusline`, installers, CLI: simulate/pets/validate/render/preview/status) | Ported 1:1 from Swift, 218 unit tests + end-to-end smoke run on Linux CI-style checks |
-| Overlay (floating pet, tray menu) | macOS implementation written (winit + softbuffer + tray-icon), compiles warning-free for `aarch64-apple-darwin`, **not yet run on real hardware** |
+| Core (`hook`, `mcp`, `statusline`, installers, CLI: simulate/pets/validate/render/preview/status) | Ported 1:1 from Swift, unit tests + end-to-end smoke run on Linux CI-style checks |
+| Overlay (floating pet, tray menu) | macOS v0.2 stage 1: runs on real hardware; **transparent window** (CALayer-presented RGBA canvas), **system-font text with Hangul** (ab_glyph over SF / SF Rounded / Helvetica / Apple SD Gothic Neo), Swift-matching bubble / gauge pill / label capsule / status badge, tray menu. Single-pet view only (see limitations) |
 | Windows / Linux overlay | Not started (the rest of the binary already runs there) |
 
 Everything the binaries write — `~/.claude-airou/state/*.json`, `*.usage.json`, `config.json`,
@@ -27,7 +27,7 @@ cd rust
 cargo build --release          # → target/release/claude-airou
 ./target/release/claude-airou pets
 ./target/release/claude-airou simulate demo   # watch it with the (Swift or Rust) overlay running
-./target/release/claude-airou run             # the Rust overlay itself (v0.1)
+./target/release/claude-airou run             # the Rust overlay itself (v0.2 stage 1)
 ```
 
 The CLI surface is identical to the Swift binary (`claude-airou help`). To point Claude Code
@@ -40,19 +40,42 @@ run its own installers (they edit the same config files, with backups):
 ./target/release/claude-airou install-mcp
 ```
 
-## Known v0.1 limitations (overlay)
+## Overlay: what is done, what remains
 
-- **Opaque card instead of a transparent window.** softbuffer's buffer has no alpha channel,
-  so the pet sits on a dark rounded card rather than floating free. Swapping the presenter
-  (e.g. wgpu or a CALayer-backed surface) is the planned fix; the drawing code is already
-  isolated in `overlay/draw.rs` behind that decision.
-- **ASCII speech bubbles.** Bubble text uses an embedded 8×8 bitmap font; non-ASCII
-  characters (한글 포함) render as `?` for now.
-- Single-pet view only: the focused session (approval-needed > busy > most recent) with a
-  `+N` label — the Swift overlay's fan-out row, pinning and snapshot/click test commands are
-  not ported yet.
+Done in v0.2 stage 1 (verified on a real Mac next to the Swift overlay):
+
+- **True per-pixel transparency.** `overlay/draw.rs` is a premultiplied-RGBA software
+  compositor (anti-aliased capsules, circles, lines, sprite blits, text) and
+  `overlay/present_macos.rs` hands the buffer to the winit window's `CALayer` as a
+  `CGImage` (BGRA premultiplied, `contentsScale` = window scale factor); the NSWindow is
+  non-opaque with a clear background and no shadow. Only drawn pixels are visible — no card.
+- **Real text.** `overlay/text.rs` rasterises with `ab_glyph` through a per-style font
+  chain (`platform_font_files`, the one platform-specific corner): SF (`opsz` set to the
+  Text cut, `wght` medium/semibold/bold), SF Rounded for the label, Helvetica, and
+  Apple SD Gothic Neo for Hangul/CJK, with per-glyph fallback and a glyph cache. The
+  bubble is the Swift one — 11.5 pt medium, 9 pt / 6 pt padding, radius 9, tail, 300 pt
+  max, two lines with `…` truncation; the label is 9.5 pt semibold rounded in a capsule.
+- Layout follows `RowLayout` for one card (220 pt minimum width, 66 pt bubble slot, gauge
+  pill, 22 pt label slot); the window widens symmetrically for wide bubbles so the pet
+  never moves, and the persisted origin is the collapsed (no-bubble) origin.
+- Light/dark appearance is picked from `NSApp.effectiveAppearance` (re-checked
+  periodically).
+
+Still missing (stage 2):
+
+- Session fan-out row, per-session pinning and the `snapshot` / `click` test commands —
+  the focused session (approval-needed > busy > most recent) is shown with a `+N` label.
+- SwiftUI niceties: bubble fade/scale animation, done-bounce / error-shake, the floating
+  heart on click (the phrase bubble is there), gear-spin and pulse on the status badge.
+  Badge icons are hand-drawn shapes rather than SF Symbols.
+- `windowOriginY` is stored in winit's top-left convention while the Swift app stores
+  AppKit's bottom-left origin, so the *vertical* position is not yet exchanged
+  correctly between the two overlays (x is).
+- Emoji in bubbles: Apple Color Emoji is a bitmap font `ab_glyph` cannot outline, so
+  emoji currently advance as blank space.
 - Session cleanup on SIGTERM is best-effort (no signal-handling crate); the overlay's
-  stale-state decay covers the gap.
+  stale-state decay covers the gap. Killing the overlay with SIGKILL leaves the pid lock
+  behind for up to a day (delete `overlay.lock` or wait) — the Swift app uses `flock`.
 
 ## Known deviations from Swift
 
@@ -76,11 +99,10 @@ listed here is meant to match 1:1 — file a bug if it doesn't):
 
 ## Roadmap to full replacement
 
-1. **v0.1 (this)** — core parity + first overlay. Validate the overlay on real macOS:
-   `cargo run --release` next to real Claude Code sessions.
-2. **v0.2 — overlay parity.** True transparency, proper text rendering (system font,
-   Korean bubbles), session fan-out + pinning, `snapshot`/`click` commands, autostart.
-   Exit criterion: a week of daily use without missing the Swift overlay.
+1. **v0.1** — core parity + first overlay (done).
+2. **v0.2 — overlay parity.** Stage 1 (done): true transparency, system-font text
+   (Korean bubbles). Stage 2: session fan-out + pinning, `snapshot`/`click` commands,
+   autostart. Exit criterion: a week of daily use without missing the Swift overlay.
 3. **v1.0 — replace Swift.** Move `Sources/ClaudeAirou/Resources/pets/` to a neutral
    `pets/` directory (update the `include_str!` paths and the Swift package resource list —
    or delete the Swift package in the same change), point the Makefile at cargo, delete
@@ -103,10 +125,12 @@ src/
   install.rs             hooks / statusline / MCP installers (backup + idempotent)
   pets.rs, render.rs     pet packs, validation, PNG/ASCII rendering
   cli_commands.rs        simulate / pets / validate / render / preview / status
-  overlay/               macOS overlay (winit, softbuffer, tray-icon) — cfg(target_os)
+  overlay/               macOS overlay — cfg(target_os): window.rs (layout/paint/events),
+                         draw.rs (RGBA compositor), text.rs (ab_glyph font chain),
+                         present_macos.rs (CALayer presenter + NSWindow tweaks), tray.rs, lock.rs
 ```
 
-Tests: `cargo test` (222 unit tests, run everywhere; overlay unit tests compile under the
+Tests: `cargo test` (261 unit tests, run everywhere; overlay unit tests compile under the
 mac target), plus `python3 integration_test.py` — a 40-check battery that drives the real
 binary end to end (hook lifecycle incl. the approval merge policy, MCP conversation with a
 real hatched PNG, installers against fixture files, Swift-file interop, robustness) inside

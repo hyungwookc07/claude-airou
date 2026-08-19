@@ -1,4 +1,4 @@
-//! The floating pet overlay — macOS implementation (winit + softbuffer + tray-icon).
+//! The floating pet overlay — macOS implementation (winit + CALayer presenter + tray-icon).
 //! Functional reference: `Sources/ClaudeAirou/UI/` (AppDelegate, OverlayPanel, PetView,
 //! PetViewModel). v0.1 scope, in priority order:
 //!
@@ -13,12 +13,13 @@
 //!    ControlFlow::WaitUntil). Focused session = attention-needed > busy > most recent
 //!    (`effective_state()`); label "<project>" or "<project> +N" with red-dot semantics
 //!    left for later. Sprite animation at the pet's fps over `frames_for(state)`.
-//! 3. Drawing (softbuffer, one RGBA framebuffer): pet sprite via `render::frame_rgba`,
-//!    status badge (red clock / orange ? / green check / red !) drawn as simple shapes,
-//!    speech bubble with the snapshot message (embedded 8×8 ASCII bitmap font; non-ASCII
-//!    replaced with '?'), battery gauge bar under the pet per `AppConfig::gauge_metric`,
-//!    session label line. Click on the pet = heart + random `pet_phrases()` line for a
-//!    few seconds; drag moves the window.
+//! 3. Drawing (software compositor `draw.rs`, premultiplied RGBA with real alpha,
+//!    presented through the NSView's CALayer in `present_macos.rs`): pet sprite via
+//!    `render::frame_rgba`, speech bubble (rounded translucent capsule, system font via
+//!    `text.rs` with Hangul fallback, two lines max), battery gauge pill per
+//!    `AppConfig::gauge_metric`, session label capsule with the compact status badge
+//!    (red clock / orange ? / green check / red ! / blue gear / yellow wave). Click on the
+//!    pet = random `pet_phrases()` line for a few seconds; drag moves the window.
 //! 4. Tray (menu bar) icon 🐾 via tray-icon/muda: Pet submenu (built-ins + user pets,
 //!    check the selected one, "Reload pets"), Size (Small 3 / Medium 5 / Large 7),
 //!    Gauge submenu, toggles (hide bubble / click-through / hide pet), Reset position,
@@ -27,18 +28,14 @@
 //! Deliberately deferred (documented in rust/README.md): session fan-out row, snapshot/
 //! click request files, per-session pinning.
 //!
-//! NOTE (transparency fallback): softbuffer 0.4's buffer format is 0RGB with no alpha
-//! channel, so per-pixel window transparency is not achievable on macOS with softbuffer
-//! alone. The overlay draws an opaque dark rounded-card look instead (see `draw.rs` and
-//! `window.rs` headers). Everything else behaves per the spec.
-//!
 //! Everything here is cfg(target_os = "macos"); keep the platform-specific window tweaks
 //! in one place so the future Windows/Linux backends only replace that corner.
 
 mod draw;
-mod font;
 mod lock;
 mod logic;
+mod present_macos;
+mod text;
 mod tray;
 mod window;
 

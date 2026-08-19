@@ -343,6 +343,17 @@ impl GaugeMetric {
         }
     }
 
+    /// Swift `shortLabel`: the tiny metric tag next to the gauge percentage.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
+    pub fn short_label(self) -> &'static str {
+        match self {
+            GaugeMetric::ContextRemaining => "ctx",
+            GaugeMetric::FiveHourRemaining => "5h",
+            GaugeMetric::SevenDayRemaining => "7d",
+            GaugeMetric::Off => "",
+        }
+    }
+
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn value(self, usage: Option<&SessionUsageSnapshot>) -> Option<f64> {
         let usage = usage?;
