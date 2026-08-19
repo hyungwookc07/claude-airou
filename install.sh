@@ -70,8 +70,13 @@ curl -fsSL "$download_base/$ASSET_NAME" -o "$temporary_dir/$ASSET_NAME" \
   || fail "download failed: $download_base/$ASSET_NAME"
 
 if curl -fsSL "$download_base/$ASSET_NAME.sha256" -o "$temporary_dir/$ASSET_NAME.sha256" 2>/dev/null; then
-  # The published file names the asset by its bare name, so verify from inside the temp dir.
-  ( cd "$temporary_dir" && shasum -a 256 -c "$ASSET_NAME.sha256" >/dev/null ) \
+  # Compare the hash itself rather than running `shasum -c`: the published file records
+  # whatever path the release job hashed (e.g. "dist/<asset>"), which never matches the
+  # temp directory the download lands in.
+  expected_checksum="$(cut -d' ' -f1 < "$temporary_dir/$ASSET_NAME.sha256")"
+  actual_checksum="$(shasum -a 256 "$temporary_dir/$ASSET_NAME" | cut -d' ' -f1)"
+  [ -n "$expected_checksum" ] || fail "the published checksum file for $release_tag is empty."
+  [ "$expected_checksum" = "$actual_checksum" ] \
     || fail "checksum mismatch — the download is corrupt or tampered with. Nothing was installed."
   say "Checksum verified."
 else
