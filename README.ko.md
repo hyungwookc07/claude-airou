@@ -52,9 +52,9 @@ Claude Code ──hook 이벤트(stdin JSON)──▶ claude-airou hook ──�
 | `PreToolUse`, `SubagentStart` | working | ⚙️ + "Reading foo.swift" 같은 도구 요약 말풍선 |
 | `PermissionRequest`, `Notification(permission_prompt)` | waiting_approval | 🔴 빨간 시계 (펄스) — **승인 필요** |
 | `PreToolUse(AskUserQuestion / ExitPlanMode)`, `Notification(agent_needs_input / elicitation_dialog)`, `Elicitation` | needs_input | 🟠 물음표 — 당신 차례 |
-| `Stop`, `Notification(agent_completed)` | done | ✅ 초록 체크 + 점프 (몇 초 후 idle) |
-| `PostToolUseFailure`, `StopFailure` | error | ❗ 흔들림 |
-| `Notification(idle_prompt)` | idle | (Claude가 응답을 마치고 60초 지남 — 막힌 상태를 정리) |
+| `Stop`, `Notification(agent_completed)` | done | ✅ 초록 체크 + 점프 (다음 프롬프트까지 유지, 말풍선은 30초 후 숨김) |
+| `PostToolUseFailure`, `StopFailure` | error | ❗ 흔들림 (다음 이벤트까지 유지) |
+| `Notification(idle_prompt)` | idle | (Claude가 응답을 마치고 60초 지남 — 막힌 busy 상태만 정리, done/error 결과는 유지) |
 | `SessionEnd` | (세션 제거) | |
 
 hook 바이너리는 stdout에 아무것도 쓰지 않고 항상 exit 0 으로 끝난다 (Claude Code는 일부 이벤트의 hook stdout을 모델 컨텍스트에 넣기 때문). 무슨 일이 있었는지는 `~/.claude-airou/hook.log`에 남는다.

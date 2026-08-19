@@ -54,9 +54,9 @@ Claude Code ──hook event (JSON on stdin)──▶ claude-airou hook ──�
 | `PreToolUse`, `SubagentStart` | working | ⚙️ + a one-line tool summary in the bubble ("Reading foo.swift", "Running: git status") |
 | `PermissionRequest`, `Notification(permission_prompt)` | waiting_approval | 🔴 pulsing red clock — **needs your approval** |
 | `PreToolUse(AskUserQuestion / ExitPlanMode)`, `Notification(agent_needs_input / elicitation_dialog)`, `Elicitation` | needs_input | 🟠 question mark — your turn |
-| `Stop`, `Notification(agent_completed)` | done | ✅ green check + a hop (back to idle after a few seconds) |
-| `PostToolUseFailure`, `StopFailure` | error | ❗ shake |
-| `Notification(idle_prompt)` | idle | (Claude finished ~60 s ago — clears anything stuck) |
+| `Stop`, `Notification(agent_completed)` | done | ✅ green check + a hop (stays until your next prompt; the bubble hides after 30 s) |
+| `PostToolUseFailure`, `StopFailure` | error | ❗ shake (stays until the next event) |
+| `Notification(idle_prompt)` | idle | (Claude finished ~60 s ago — clears a stuck busy state; a done/error result stays) |
 | `SessionEnd` | (session removed) | |
 
 The hook binary never writes to stdout and always exits 0 (Claude Code feeds some events' hook stdout back into the model context). What it saw is logged to `~/.claude-airou/hook.log` (auto-truncated).

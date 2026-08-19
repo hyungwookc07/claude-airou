@@ -186,6 +186,12 @@ impl OverlayModel {
             .map(|session| session.effective_state())
             .unwrap_or(PetState::Idle);
         let new_message = match &focused {
+            Some(session)
+                if matches!(new_state, PetState::Done | PetState::Error)
+                    && session.age_secs() > PetState::RESULT_BUBBLE_LINGER_SECS =>
+            {
+                String::new() // the result badge stays; the bubble steps aside after a while
+            }
             Some(session) if new_state != PetState::Idle => session.message.clone(),
             _ => String::new(),
         };
@@ -617,6 +623,21 @@ mod tests {
 
     fn model() -> OverlayModel {
         OverlayModel::new(INPUTS)
+    }
+
+    #[test]
+    fn done_bubble_steps_aside_after_the_linger_but_the_state_stays() {
+        let mut model = model();
+        model.reload(vec![snapshot("s", "/w/s", PetState::Done, 5.0)], vec![], 0.0);
+        assert_eq!(model.display_state, PetState::Done);
+        assert_eq!(model.speech_text(), "msg-s");
+        model.reload(
+            vec![snapshot("s", "/w/s", PetState::Done, PetState::RESULT_BUBBLE_LINGER_SECS + 1.0)],
+            vec![],
+            0.0,
+        );
+        assert_eq!(model.display_state, PetState::Done, "badge/label icon keep showing the result");
+        assert!(!model.is_speech_bubble_visible(false));
     }
 
     #[test]

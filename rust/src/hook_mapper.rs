@@ -380,6 +380,14 @@ pub fn resolve(
     let existing_state = existing.map(SessionSnapshot::effective_state).unwrap_or(PetState::Idle);
     let user_is_blocked = existing_state.is_attention_needed();
 
+    // "Claude finished ~60 s ago and you haven't typed" — the finished/failed result is
+    // exactly what the user still wants to see, so idle_prompt only clears busy states.
+    if input.notification_type() == Some("idle_prompt")
+        && matches!(existing_state, PetState::Done | PetState::Error)
+    {
+        return Resolution::Keep(format!("idle_prompt while {}", existing_state.raw()));
+    }
+
     if user_is_blocked {
         if let Some(existing) = existing {
             // Subagents keep running while the main thread waits on the user; ignore their chatter.
@@ -873,6 +881,31 @@ mod tests {
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: pending.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn resolve_keeps_a_finished_result_through_idle_prompt() {
+        let idle_prompt = input(json!({
+            "hook_event_name": "Notification",
+            "session_id": "s1",
+            "cwd": "/tmp/project",
+            "notification_type": "idle_prompt",
+            "message": "Claude is waiting for your input"
+        }));
+        for state in [PetState::Done, PetState::Error] {
+            let mut existing = blocked_snapshot(state, None);
+            existing.last_event_name = "Stop".into();
+            match resolve(Some(&existing), &idle_prompt, PetState::Idle, "", None, now_epoch_secs()) {
+                Resolution::Keep(reason) => assert!(reason.contains("idle_prompt"), "{reason}"),
+                Resolution::Write(_) => panic!("idle_prompt must not clear {state:?}"),
+            }
+        }
+        // A busy state is still cleared (interrupt cleanup).
+        let busy = blocked_snapshot(PetState::Working, None);
+        assert!(matches!(
+            resolve(Some(&busy), &idle_prompt, PetState::Idle, "", None, now_epoch_secs()),
+            Resolution::Write(_)
+        ));
     }
 
     #[test]

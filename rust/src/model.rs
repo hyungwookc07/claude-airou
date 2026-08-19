@@ -54,13 +54,20 @@ impl PetState {
         matches!(self, PetState::WaitingApproval | PetState::NeedsInput)
     }
 
+    /// How long the speech bubble of a sticky done / error result stays up before only the
+    /// badge remains (see `transient_duration_secs`).
+    pub const RESULT_BUBBLE_LINGER_SECS: f64 = 30.0;
+
     /// Seconds after which the state decays back to `idle` if no newer event arrives.
     /// `None` means the state is sticky. Mirrors `PetState.transientDurationSeconds`.
     pub fn transient_duration_secs(self) -> Option<f64> {
         match self {
             PetState::Hello => Some(4.0),
-            PetState::Done => Some(6.0),
-            PetState::Error => Some(8.0),
+            // done / error stay until the next event (a new prompt, SessionEnd, …): the
+            // result should still be on screen when the user comes back to look — a
+            // 6-second flash was gone before anyone saw it. Only the bubble hides after
+            // `RESULT_BUBBLE_LINGER_SECS`; the badge and label icon remain.
+            PetState::Done | PetState::Error => None,
             PetState::WaitingApproval | PetState::NeedsInput => Some(20.0 * 60.0),
             PetState::Thinking | PetState::Working => Some(15.0 * 60.0),
             PetState::Idle => None,
@@ -534,6 +541,23 @@ mod tests {
             pending_tool_use_id: None,
         };
         assert_eq!(snapshot.effective_state(), PetState::Idle);
+    }
+
+    #[test]
+    fn done_and_error_are_sticky_until_the_next_event() {
+        for state in [PetState::Done, PetState::Error] {
+            let snapshot = SessionSnapshot {
+                session_id: "s".into(),
+                cwd: "/tmp".into(),
+                state,
+                message: "Done!".into(),
+                last_event_name: "Stop".into(),
+                tool_name: None,
+                updated_at_epoch_seconds: now_epoch_secs() - 3.0 * 60.0 * 60.0,
+                pending_tool_use_id: None,
+            };
+            assert_eq!(snapshot.effective_state(), state, "{state:?} must not decay");
+        }
     }
 
     #[test]
