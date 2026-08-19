@@ -4,7 +4,7 @@
 //! nothing here touches a window, so it is unit-tested without one.
 
 use super::row_layout::{GridSize, RowCard, RowLayout};
-use crate::model::{GaugeMetric, PetState, SessionSnapshot, SessionUsageSnapshot};
+use crate::model::{EffortLevel, GaugeMetric, PetState, SessionSnapshot, SessionUsageSnapshot};
 use std::collections::HashMap;
 
 /// Seconds a pet-click reaction phrase stays on screen (Swift: `petReactionDurationSeconds`).
@@ -308,6 +308,22 @@ impl OverlayModel {
             .unwrap_or(PetState::Idle)
     }
 
+    /// The aura to paint behind a card's pet: only while that session is actually busy,
+    /// and only when the status line has told us an effort level (it is the sole source —
+    /// hooks never carry it, so a user without `install-statusline` sees no aura).
+    pub fn effort_aura_for_card(&self, card: &RowCard, is_aura_hidden: bool) -> Option<EffortLevel> {
+        if is_aura_hidden {
+            return None;
+        }
+        if !matches!(self.state_for_card(card), PetState::Thinking | PetState::Working) {
+            return None;
+        }
+        card.session_id
+            .as_ref()
+            .and_then(|id| self.usage_by_session.get(id))
+            .and_then(|usage| usage.effort_level)
+    }
+
     /// Remaining percentage for a card's gauge, or None when unknown.
     pub fn gauge_value_for_card(&self, card: &RowCard, metric: GaugeMetric) -> Option<f64> {
         let usage = card.session_id.as_ref().and_then(|id| self.usage_by_session.get(id));
@@ -597,6 +613,7 @@ mod tests {
         SessionUsageSnapshot {
             session_id: id.to_string(),
             source: UsageSource::StatusLine,
+            effort_level: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             context_used_percentage: ctx_used,
             context_window_size: None,
@@ -866,6 +883,28 @@ mod tests {
         assert_eq!(model.gauge_value_for_card(&busy_card, GaugeMetric::Off), None);
         assert_eq!(model.state_for_card(&busy_card), PetState::Working);
         assert_eq!(model.state_for_card(&waiting_card), PetState::WaitingApproval);
+    }
+
+
+    #[test]
+    fn effort_aura_only_while_busy_and_only_with_a_known_level() {
+        let mut model = model();
+        let mut busy_usage = usage("busy", Some(25.0), None);
+        busy_usage.effort_level = Some(EffortLevel::High);
+        let mut waiting_usage = usage("waiting", Some(25.0), None);
+        waiting_usage.effort_level = Some(EffortLevel::Max);
+        model.reload(three_sessions(), vec![busy_usage, waiting_usage, usage("recent", Some(25.0), None)], 0.0);
+        model.is_fanned_out = true;
+        assert_eq!(model.relayout(INPUTS, 0.0, 0.0), LayoutChange::PanelGeometry);
+        let card = |id: &str| model.layout.cards.iter().find(|card| card.id() == id).unwrap().clone();
+
+        assert_eq!(model.effort_aura_for_card(&card("busy"), false), Some(EffortLevel::High));
+        // Waiting on the user is not "hard at work": no aura, whatever the level says.
+        assert_eq!(model.effort_aura_for_card(&card("waiting"), false), None);
+        // Idle session, and one whose status line never reported a level.
+        assert_eq!(model.effort_aura_for_card(&card("recent"), false), None);
+        // The menu switch wins over everything.
+        assert_eq!(model.effort_aura_for_card(&card("busy"), true), None);
     }
 
     #[test]

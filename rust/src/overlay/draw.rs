@@ -372,6 +372,38 @@ impl Canvas {
 
     /// A heart (two lobes + a point) with its top lobes centred around (`center_x`,
     /// `center_y`) and `size` as its width — the pet-click "heart.fill".
+    /// A soft halo: full strength out to `inner_radius`, fading to nothing at
+    /// `outer_radius`. The flat core matters — the pet sprite covers the middle, so a glow
+    /// that peaks at the centre and falls off from there is invisible where it actually
+    /// shows. Only the band between the two radii is seen.
+    pub fn fill_radial_glow(&mut self, center_x: f32, center_y: f32, inner_radius: f32, outer_radius: f32, color: Color) {
+        if outer_radius <= 0.0 || outer_radius <= inner_radius || color.alpha == 0 {
+            return;
+        }
+        let left = (center_x - outer_radius).floor().max(0.0) as i32;
+        let right = (center_x + outer_radius).ceil().min(self.width as f32) as i32;
+        let top = (center_y - outer_radius).floor().max(0.0) as i32;
+        let bottom = (center_y + outer_radius).ceil().min(self.height as f32) as i32;
+        let band = outer_radius - inner_radius;
+        for y in top..bottom {
+            for x in left..right {
+                let dx = x as f32 + 0.5 - center_x;
+                let dy = y as f32 + 0.5 - center_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance >= outer_radius {
+                    continue;
+                }
+                let falloff = if distance <= inner_radius {
+                    1.0
+                } else {
+                    let t = (distance - inner_radius) / band;
+                    (1.0 - t) * (1.0 - t)
+                };
+                self.blend_pixel(x, y, premultiply(color.with_opacity(falloff)));
+            }
+        }
+    }
+
     pub fn fill_heart(&mut self, center_x: f32, center_y: f32, size: f32, color: Color) {
         let lobe_radius = size * 0.27;
         let lobe_offset_x = size * 0.23;

@@ -187,6 +187,57 @@ impl SessionSnapshot {
     }
 }
 
+/// Reasoning effort for a session, as the Claude Code status line reports it
+/// (`effort.level`). Absent when the model has no effort parameter, so every consumer
+/// treats "unknown" as "draw nothing".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EffortLevel {
+    Low,
+    Medium,
+    High,
+    #[serde(rename = "xhigh")]
+    XHigh,
+    Max,
+}
+
+impl EffortLevel {
+    pub fn from_raw(raw: &str) -> Option<EffortLevel> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "low" => Some(EffortLevel::Low),
+            "medium" => Some(EffortLevel::Medium),
+            "high" => Some(EffortLevel::High),
+            "xhigh" => Some(EffortLevel::XHigh),
+            "max" => Some(EffortLevel::Max),
+            _ => None, // a numeric token budget or a level we do not know yet
+        }
+    }
+
+    pub fn raw(self) -> &'static str {
+        match self {
+            EffortLevel::Low => "low",
+            EffortLevel::Medium => "medium",
+            EffortLevel::High => "high",
+            EffortLevel::XHigh => "xhigh",
+            EffortLevel::Max => "max",
+        }
+    }
+
+    /// How big and how bright the aura behind the pet is: (radius as a multiple of the
+    /// sprite's half-height, peak opacity). Kept gentle — the overlay sits on top of the
+    /// user's work all day, so even `max` is a glow rather than a lamp.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay-only
+    pub fn aura_radius_and_opacity(self) -> (f32, f32) {
+        match self {
+            EffortLevel::Low => (1.00, 0.10),
+            EffortLevel::Medium => (1.20, 0.15),
+            EffortLevel::High => (1.40, 0.21),
+            EffortLevel::XHigh => (1.60, 0.27),
+            EffortLevel::Max => (1.80, 0.34),
+        }
+    }
+}
+
 /// Usage figures for one session (`<session>.usage.json`). Mirrors `SessionUsageSnapshot`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,6 +258,8 @@ pub struct SessionUsageSnapshot {
     pub total_output_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort_level: Option<EffortLevel>,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub five_hour_used_percentage: Option<f64>,
@@ -401,6 +454,7 @@ pub struct AppConfig {
     pub is_click_through: bool,
     pub is_pet_hidden: bool,
     pub is_sessions_always_expanded: bool,
+    pub is_effort_aura_hidden: bool,
     #[serde(deserialize_with = "lenient_gauge_metric")]
     pub gauge_metric: GaugeMetric,
 }
@@ -427,6 +481,7 @@ impl Default for AppConfig {
             is_click_through: false,
             is_pet_hidden: false,
             is_sessions_always_expanded: false,
+            is_effort_aura_hidden: false,
             gauge_metric: GaugeMetric::ContextRemaining,
         }
     }
@@ -506,10 +561,42 @@ mod tests {
     }
 
     #[test]
+    fn aura_grows_and_brightens_with_effort() {
+        let mut previous = (0.0f32, 0.0f32);
+        for level in [
+            EffortLevel::Low,
+            EffortLevel::Medium,
+            EffortLevel::High,
+            EffortLevel::XHigh,
+            EffortLevel::Max,
+        ] {
+            let (radius, opacity) = level.aura_radius_and_opacity();
+            assert!(radius > previous.0, "{level:?} should be larger than the level below");
+            assert!(opacity > previous.1, "{level:?} should be brighter than the level below");
+            assert!(opacity <= 0.35, "{level:?} must stay a glow, not a lamp");
+            previous = (radius, opacity);
+        }
+    }
+
+    #[test]
+    fn effort_level_parses_what_the_status_line_sends() {
+        assert_eq!(EffortLevel::from_raw("high"), Some(EffortLevel::High));
+        assert_eq!(EffortLevel::from_raw("XHIGH"), Some(EffortLevel::XHigh));
+        assert_eq!(EffortLevel::from_raw(" max "), Some(EffortLevel::Max));
+        // A numeric token budget, or a level from a newer Claude Code: no aura, no crash.
+        assert_eq!(EffortLevel::from_raw("31999"), None);
+        assert_eq!(EffortLevel::from_raw(""), None);
+        for level in [EffortLevel::Low, EffortLevel::XHigh, EffortLevel::Max] {
+            assert_eq!(EffortLevel::from_raw(level.raw()), Some(level), "raw() round-trips");
+        }
+    }
+
+    #[test]
     fn usage_snapshot_keys_match_swift() {
         let usage = SessionUsageSnapshot {
             session_id: "s".into(),
             source: UsageSource::StatusLine,
+            effort_level: None,
             updated_at_epoch_seconds: 1.0,
             context_used_percentage: Some(40.0),
             context_window_size: Some(200000),

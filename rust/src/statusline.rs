@@ -131,6 +131,12 @@ fn parse_usage(object: &Value, now_secs: f64) -> Option<SessionUsageSnapshot> {
     let seven_day = rate_limits.and_then(|limits| limits.get("seven_day")).and_then(Value::as_object);
     let cost = object.get("cost").and_then(Value::as_object);
     let model = object.get("model").and_then(Value::as_object);
+    let effort_level = object
+        .get("effort")
+        .and_then(Value::as_object)
+        .and_then(|effort| effort.get("level"))
+        .and_then(Value::as_str)
+        .and_then(crate::model::EffortLevel::from_raw);
 
     let mut context_used = number(context_window, "used_percentage");
     let context_size = number(context_window, "context_window_size").map(|value| value as i64);
@@ -165,6 +171,7 @@ fn parse_usage(object: &Value, now_secs: f64) -> Option<SessionUsageSnapshot> {
         context_tokens,
         total_input_tokens: number(context_window, "total_input_tokens").map(|value| value as i64),
         total_output_tokens: number(context_window, "total_output_tokens").map(|value| value as i64),
+        effort_level,
         model_display_name: model
             .and_then(|model| model.get("display_name"))
             .and_then(Value::as_str)
@@ -423,6 +430,7 @@ fn transcript_estimate_at(
             context_tokens: Some(context_tokens),
             total_input_tokens: None,
             total_output_tokens: None,
+            effort_level: None, // the transcript never carries it; only the status line JSON does
             model_display_name: if model.is_empty() { None } else { Some(model.to_string()) },
             five_hour_used_percentage: None,
             five_hour_resets_at_epoch_seconds: None,
@@ -488,7 +496,8 @@ mod tests {
                     "five_hour": {"used_percentage": 10, "resets_at": 1755500000},
                     "seven_day": {"used_percentage": 20.5, "resets_at": 1755500000000}
                 },
-                "cost": {"total_cost_usd": 1.25}
+                "cost": {"total_cost_usd": 1.25},
+                "effort": {"level": "xhigh"}
             }"#,
         );
         let usage = parse_usage(&object, 123.0).expect("usage");
@@ -507,6 +516,22 @@ mod tests {
         // Milliseconds (> 1e12) get divided down to seconds.
         assert_eq!(usage.seven_day_resets_at_epoch_seconds, Some(1755500000.0));
         assert_eq!(usage.total_cost_usd, Some(1.25));
+        assert_eq!(usage.effort_level, Some(crate::model::EffortLevel::XHigh));
+    }
+
+    #[test]
+    fn parse_usage_without_effort_leaves_it_unset() {
+        // The field is absent whenever the model has no effort parameter, and can also be a
+        // numeric token budget — either way there is nothing to draw.
+        for json in [
+            r#"{"session_id": "s1"}"#,
+            r#"{"session_id": "s1", "effort": {}}"#,
+            r#"{"session_id": "s1", "effort": {"level": 31999}}"#,
+            r#"{"session_id": "s1", "effort": {"level": "enthusiastic"}}"#,
+        ] {
+            let usage = parse_usage(&value(json), 1.0).expect("usage");
+            assert_eq!(usage.effort_level, None, "{json}");
+        }
     }
 
     #[test]

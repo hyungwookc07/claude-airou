@@ -127,6 +127,8 @@ claude-airou install-mcp [--print]     / uninstall-mcp
 
 ### 배터리 게이지
 
+같은 데이터에 세션의 **추론 effort**(`effort.level`)도 들어 있다. 펫은 이것을 자기 뒤의 은은한 후광으로 보여준다 — `low`에서 `max`로 갈수록 커지고 밝아지며, 세션이 끝나거나 사용자를 기다리기 시작하면 사라진다. 색은 시스템 강조 색상을 따르고, 메뉴바 🐾 메뉴에 **Hide effort aura** 스위치가 있다. 상태줄을 설치하지 않으면 오라도 없다 — hook 이벤트에는 effort가 실려 오지 않는다.
+
 Claude Code는 상태줄 명령에 `context_window.used_percentage`, `rate_limits.five_hour / seven_day`, `cost`가 담긴 JSON을 넘긴다. `make statusline`(또는 `claude-airou install-statusline`)은 `settings.statusLine`을 `claude-airou statusline`으로 바꾸는데, 이 명령은 그 수치를 세션별로 기록한 뒤 **원래 쓰던 상태줄 명령을 같은 stdin으로 그대로 실행**한다 — 터미널 상태줄은 전과 똑같이 보인다. 원래 설정은 `~/.claude-airou/statusline-passthrough.json`에 보관되고 `claude-airou uninstall-statusline`으로 복원된다.
 
 상태줄이 돌지 않는 세션(일부 데스크톱 앱 세션 등)도 컨텍스트 게이지는 나온다: hook이 transcript의 마지막 assistant 메시지 토큰 사용량으로 추정한다. 한도(rate limit)는 상태줄로만 알 수 있다.

@@ -128,6 +128,8 @@ Under each pet: a **battery gauge** (context window remaining by default; switch
 
 ### Battery gauge
 
+The same feed also carries the session's **reasoning effort** (`effort.level`), which the pet shows as a soft halo behind itself while it is thinking or working — bigger and brighter from `low` up to `max`, gone the moment the session finishes or starts waiting on you. It uses your system accent colour, and the menu bar 🐾 menu has a **Hide effort aura** switch. No status line, no aura: hooks never carry the effort level.
+
 Claude Code hands its status line a JSON with `context_window.used_percentage`, `rate_limits.five_hour / seven_day` and `cost`. `make statusline` (or `claude-airou install-statusline`) sets `settings.statusLine` to `claude-airou statusline`, which records those figures per session and then **runs your original status line command with the same stdin** — so your terminal status line looks exactly as before. The original is kept in `~/.claude-airou/statusline-passthrough.json`; `claude-airou uninstall-statusline` restores it.
 
 Sessions that never run a status line (e.g. some desktop-app sessions) still get a context gauge: the hook estimates it from the last assistant message's token usage in the transcript. Rate limits are only known through the status line.

@@ -495,6 +495,7 @@ impl App {
             click_through: self.config.is_click_through,
             pet_hidden: self.config.is_pet_hidden,
             start_at_login: crate::setup::is_login_autostart_installed(),
+            effort_aura_hidden: self.config.is_effort_aura_hidden,
         }
     }
 
@@ -563,6 +564,11 @@ impl App {
                 self.model.is_always_fanned_out = self.config.is_sessions_always_expanded;
                 self.config.save();
                 self.relayout();
+            }
+            ToggleEffortAura => {
+                self.config.is_effort_aura_hidden = !self.config.is_effort_aura_hidden;
+                self.config.save();
+                self.request_redraw();
             }
             ToggleBubbles => {
                 self.config.is_speech_bubble_hidden = !self.config.is_speech_bubble_hidden;
@@ -929,6 +935,23 @@ impl App {
         }
         let sprite_left = ((center_x - sprite_width_points / 2.0 + sprite_offset_x) * scale).round() as i32;
         let sprite_top = ((sprite_bottom - sprite_height_points + sprite_offset_y) * scale).round() as i32;
+        // Aura first, so the sprite sits on top of its own glow.
+        if let Some(effort) = self.model.effort_aura_for_card(card, self.config.is_effort_aura_hidden) {
+            let (radius_scale, opacity) = effort.aura_radius_and_opacity();
+            let sprite_center_x = center_x + sprite_offset_x;
+            let sprite_center_y = sprite_bottom - sprite_height_points / 2.0 + sprite_offset_y;
+            // The flat core reaches roughly the sprite's own edge; the band beyond it is
+            // what the user actually sees, and that is what effort grows.
+            let half_height = sprite_height_points / 2.0;
+            card_canvas.fill_radial_glow(
+                sprite_center_x * scale,
+                sprite_center_y * scale,
+                half_height * 0.72 * scale,
+                half_height * radius_scale * scale,
+                self.theme.accent.with_opacity(if card.is_primary { opacity } else { opacity * 0.6 }),
+            );
+        }
+
         let frames = self.pet.frames_for(state);
         if !frames.is_empty() {
             let frame = &frames[self.model.frame_index % frames.len()];
