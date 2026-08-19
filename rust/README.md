@@ -141,6 +141,28 @@ listed here is meant to match 1:1 — file a bug if it doesn't):
 4. **v1.1 — Windows overlay** (tray + layered window), then Linux (X11 first; Wayland
    always-on-top/click-through is compositor-dependent).
 
+### What Windows needs beyond the overlay
+
+Everything except the overlay already compiles for `x86_64-pc-windows-msvc`, but two
+installer corners are still macOS-shaped. Both need a real Windows machine to settle,
+because the answer depends on what is installed there.
+
+- **The status line entry cannot dodge the shell.** Claude Code runs status line commands
+  through Git Bash when it is installed and PowerShell when it is not, and unlike hooks the
+  `statusLine` schema has no `args` (exec form) escape hatch — so the same string has to
+  survive both shells. An unquoted forward-slash path works in either, but a path
+  containing a space has no form that satisfies both (Git Bash wants quotes, PowerShell
+  needs the call operator). Detecting Git Bash at install time and writing the matching
+  form is the likely answer. Hooks already avoid this entirely (see
+  `should_write_exec_form_hooks`).
+- **The passthrough spawns `/bin/sh` directly** (`statusline.rs`), which does not exist on
+  Windows: the user's original status line would silently vanish. Whatever shell is chosen
+  has to match the one Claude Code would have used, since the stored command is written in
+  that shell's syntax.
+
+Start-at-login is macOS-only too (`setup.rs`), and needs a registry `Run` key or a Startup
+shortcut on Windows; the tray's "Start at login" check reports off there until then.
+
 ## Layout
 
 ```
