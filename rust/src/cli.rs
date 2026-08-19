@@ -37,6 +37,9 @@ USAGE
   claude-airou preview PET_ID|FILE [--state STATE] [--solid]
                                    Print frames as ASCII
   claude-airou status                Print the sessions the overlay currently sees
+  claude-airou snapshot [--out FILE.png]
+                                   Ask the running overlay to save a PNG of itself
+  claude-airou click [primary|X]     Click the running overlay (primary pet, or x in points) — for testing
   claude-airou help
 
 FILES
@@ -125,6 +128,8 @@ pub fn dispatch(arguments: Vec<String>) -> i32 {
         "render" => crate::cli_commands::run_render(&rest, &parsed),
         "preview" => crate::cli_commands::run_preview(&rest, &parsed),
         "status" | "sessions" => crate::cli_commands::run_status(),
+        "snapshot" => crate::cli_commands::run_snapshot(&parsed),
+        "click" => crate::cli_commands::run_click(&rest),
         "help" => {
             println!("{USAGE_TEXT}");
             0

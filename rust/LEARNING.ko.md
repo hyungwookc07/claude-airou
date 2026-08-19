@@ -104,11 +104,16 @@ Swift 쪽은 GCD(`DispatchQueue`, `DispatchSourceTimer`)로 동시성을 처리�
 
 - `#[cfg(target_os = "macos")]` — 플랫폼 분기가 파일/모듈 단위로 어떻게 걸리는지.
   `main.rs`의 `mod overlay;` 선언부터 따라가 보라.
-- `window.rs`의 `apply_macos_window_behavior` — 이 크레이트의 **유일한 `unsafe`**.
-  러스트의 안전 보장이 어디까지고, OS API(Objective-C 런타임)를 만나는 지점에서 어떻게
-  좁은 상자 안에 가두는지 보여준다. "unsafe는 금지가 아니라 격리"라는 감각.
-- `draw.rs`/`font.rs`는 의존성 없이 소프트웨어 렌더링을 하는 순수 로직이라, GUI에 관심
-  없어도 배열 다루기 연습 자료로 좋다.
+- `present_macos.rs` — 이 크레이트의 `unsafe`가 모두 모여 있는 곳(CALayer 프레젠터,
+  NSWindow/NSScreen/NSAlert 브리지). 러스트의 안전 보장이 어디까지고, OS API(Objective-C
+  런타임)를 만나는 지점에서 어떻게 좁은 상자 안에 가두는지 보여준다. "unsafe는 금지가
+  아니라 격리"라는 감각.
+- `row_layout.rs` / `logic.rs` / `animation.rs` / `placement.rs`는 창 없이 단위 테스트되는
+  순수 로직(Swift의 `RowLayout`, `PetViewModel`, SwiftUI 애니메이션, `OverlayPanel` 배치
+  규칙의 포팅). "뷰 모델을 순수 함수로 짜고, 창(window.rs)은 그 결과를 그리기만 한다"는
+  구조를 보기 좋다.
+- `draw.rs`/`text.rs`는 의존성 거의 없이 소프트웨어 렌더링을 하는 순수 로직이라, GUI에
+  관심 없어도 배열 다루기 연습 자료로 좋다.
 
 ## 개념 대응표 (요약)
 

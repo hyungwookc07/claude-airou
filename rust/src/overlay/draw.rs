@@ -25,7 +25,6 @@ pub struct Color {
 }
 
 impl Color {
-    #[cfg(test)]
     pub const TRANSPARENT: Color = Color::rgba(0, 0, 0, 0);
     pub const WHITE: Color = Color::rgb(255, 255, 255);
 
@@ -54,7 +53,6 @@ pub fn premultiply(color: Color) -> u32 {
 }
 
 /// Unpacks a premultiplied pixel back to a straight-alpha color (0 alpha → transparent black).
-#[cfg(test)]
 pub fn unpremultiply(pixel: u32) -> Color {
     let alpha = pixel >> 24;
     if alpha == 0 {
@@ -323,6 +321,107 @@ impl Canvas {
         }
     }
 
+    /// Composites another canvas (premultiplied, same format) over this one with its top-left
+    /// at (`x`, `y`), scaled by `scale` (nearest-neighbour sampling, anchored top-left) and
+    /// multiplied by `opacity`. `scale == 1` at whole-pixel offsets is an exact copy, so
+    /// crisp pet pixels stay crisp when nothing is animating.
+    pub fn blit_canvas(&mut self, source: &Canvas, x: f32, y: f32, scale: f32, opacity: f32) {
+        if source.width == 0 || source.height == 0 || scale <= 0.0 || opacity <= 0.0 {
+            return;
+        }
+        let opacity = opacity.min(1.0);
+        let is_identity = (scale - 1.0).abs() < 1e-6 && x.fract() == 0.0 && y.fract() == 0.0;
+        if is_identity {
+            let left = x as i32;
+            let top = y as i32;
+            for row in 0..source.height as i32 {
+                for column in 0..source.width as i32 {
+                    let pixel = source.pixels[row as usize * source.width as usize + column as usize];
+                    if pixel >> 24 == 0 {
+                        continue;
+                    }
+                    self.blend_pixel(left + column, top + row, scale_premultiplied(pixel, opacity));
+                }
+            }
+            return;
+        }
+        let dest_width = source.width as f32 * scale;
+        let dest_height = source.height as f32 * scale;
+        let first_column = x.floor() as i32;
+        let last_column = (x + dest_width).ceil() as i32;
+        let first_row = y.floor() as i32;
+        let last_row = (y + dest_height).ceil() as i32;
+        for row in first_row.max(0)..last_row.min(self.height as i32) {
+            let sample_y = ((row as f32 + 0.5 - y) / scale).floor() as i32;
+            if sample_y < 0 || sample_y >= source.height as i32 {
+                continue;
+            }
+            for column in first_column.max(0)..last_column.min(self.width as i32) {
+                let sample_x = ((column as f32 + 0.5 - x) / scale).floor() as i32;
+                if sample_x < 0 || sample_x >= source.width as i32 {
+                    continue;
+                }
+                let pixel = source.pixels[sample_y as usize * source.width as usize + sample_x as usize];
+                if pixel >> 24 == 0 {
+                    continue;
+                }
+                self.blend_pixel(column, row, scale_premultiplied(pixel, opacity));
+            }
+        }
+    }
+
+    /// A heart (two lobes + a point) with its top lobes centred around (`center_x`,
+    /// `center_y`) and `size` as its width — the pet-click "heart.fill".
+    pub fn fill_heart(&mut self, center_x: f32, center_y: f32, size: f32, color: Color) {
+        let lobe_radius = size * 0.27;
+        let lobe_offset_x = size * 0.23;
+        let lobe_center_y = center_y - size * 0.12;
+        self.fill_circle(center_x - lobe_offset_x, lobe_center_y, lobe_radius, color);
+        self.fill_circle(center_x + lobe_offset_x, lobe_center_y, lobe_radius, color);
+        let triangle_top = lobe_center_y + lobe_radius * 0.05;
+        let triangle_half_width = lobe_offset_x + lobe_radius * 0.99;
+        self.fill_triangle_down(
+            center_x - triangle_half_width,
+            triangle_top,
+            triangle_half_width * 2.0,
+            size * 0.55,
+            color,
+        );
+    }
+
+    /// The canvas as straight-alpha RGBA8 bytes (row-major, top-down) — for PNG export.
+    pub fn to_rgba8(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.pixels.len() * 4);
+        for pixel in &self.pixels {
+            let color = unpremultiply(*pixel);
+            bytes.extend_from_slice(&[color.red, color.green, color.blue, color.alpha]);
+        }
+        bytes
+    }
+
+    /// Encodes the canvas as a PNG (RGBA8, straight alpha), like the Swift snapshot.
+    pub fn encode_png(&self) -> Result<Vec<u8>, String> {
+        let mut output = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut output, self.width, self.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
+            writer.write_image_data(&self.to_rgba8()).map_err(|error| error.to_string())?;
+        }
+        Ok(output)
+    }
+
+    /// `draw_text` with tabular (fixed-width) digits, like SwiftUI's `.monospacedDigit()`.
+    pub fn draw_text_tabular_digits(&mut self, rasterizer: &mut TextRasterizer, text: &str, x: f32, y: f32, color: Color) -> f32 {
+        let premultiplied = premultiply(color);
+        rasterizer.rasterize_line_tabular_digits(text, x, y, |pixel_x, pixel_y, coverage| {
+            if coverage > 0.0 {
+                self.blend_pixel(pixel_x, pixel_y, scale_premultiplied(premultiplied, coverage));
+            }
+        })
+    }
+
     /// Draws one line of anti-aliased text; (`x`, `y`) is the top-left corner of the line
     /// box (the rasterizer places the baseline at `y + ascent`). Returns the advance width.
     pub fn draw_text(&mut self, rasterizer: &mut TextRasterizer, text: &str, x: f32, y: f32, color: Color) -> f32 {
@@ -577,5 +676,55 @@ mod tests {
     #[test]
     fn wrap_text_empty_input() {
         assert_eq!(wrap_text("", 10.0, 2, char_count), vec![String::new()]);
+    }
+
+    #[test]
+    fn blit_canvas_identity_copies_and_opacity_scales() {
+        let mut source = Canvas::new(2, 2);
+        source.fill_rect(0, 0, 2, 2, Color::rgb(255, 0, 0));
+        let mut target = Canvas::new(6, 6);
+        target.blit_canvas(&source, 2.0, 3.0, 1.0, 1.0);
+        assert_eq!(target.color_at(2, 3), Color::rgb(255, 0, 0));
+        assert_eq!(target.color_at(3, 4), Color::rgb(255, 0, 0));
+        assert_eq!(target.color_at(1, 3), Color::TRANSPARENT);
+        assert_eq!(target.color_at(4, 3), Color::TRANSPARENT);
+        let mut faded = Canvas::new(6, 6);
+        faded.blit_canvas(&source, 0.0, 0.0, 1.0, 0.5);
+        assert!((faded.color_at(0, 0).alpha as i32 - 128).abs() <= 1);
+        // Scaled by 2: covers a 4x4 block; scaled by 0.5: one pixel.
+        let mut doubled = Canvas::new(6, 6);
+        doubled.blit_canvas(&source, 1.0, 1.0, 2.0, 1.0);
+        assert_eq!(doubled.color_at(1, 1), Color::rgb(255, 0, 0));
+        assert_eq!(doubled.color_at(4, 4), Color::rgb(255, 0, 0));
+        assert_eq!(doubled.color_at(5, 5), Color::TRANSPARENT);
+        let mut halved = Canvas::new(6, 6);
+        halved.blit_canvas(&source, 0.0, 0.0, 0.5, 1.0);
+        assert_eq!(halved.color_at(0, 0), Color::rgb(255, 0, 0));
+        assert_eq!(halved.color_at(1, 1), Color::TRANSPARENT);
+        // Degenerate arguments are ignored.
+        let mut untouched = Canvas::new(6, 6);
+        untouched.blit_canvas(&source, 0.0, 0.0, 0.0, 1.0);
+        untouched.blit_canvas(&source, 0.0, 0.0, 1.0, 0.0);
+        assert!(untouched.pixels.iter().all(|pixel| *pixel == 0));
+    }
+
+    #[test]
+    fn heart_and_png_export_round_trip() {
+        let mut canvas = Canvas::new(20, 20);
+        canvas.fill_heart(10.0, 9.0, 14.0, Color::rgb(255, 45, 85));
+        assert_eq!(canvas.color_at(10, 8), Color::rgb(255, 45, 85), "between the lobes is filled");
+        assert_eq!(canvas.color_at(0, 0), Color::TRANSPARENT);
+        assert!(canvas.color_at(10, 14).alpha > 0, "the point reaches down");
+        assert_eq!(canvas.color_at(10, 17), Color::TRANSPARENT);
+        let png_bytes = canvas.encode_png().unwrap();
+        let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+        let mut reader = decoder.read_info().unwrap();
+        let mut buffer = vec![0u8; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buffer).unwrap();
+        assert_eq!((info.width, info.height), (20, 20));
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+        assert_eq!(&buffer[..], &canvas.to_rgba8()[..]);
+        let center = (8 * 20 + 10) * 4;
+        assert_eq!(&buffer[center..center + 4], &[255, 45, 85, 255]);
     }
 }

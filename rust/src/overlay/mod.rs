@@ -1,40 +1,43 @@
 //! The floating pet overlay — macOS implementation (winit + CALayer presenter + tray-icon).
 //! Functional reference: `Sources/ClaudeAirou/UI/` (AppDelegate, OverlayPanel, PetView,
-//! PetViewModel). v0.1 scope, in priority order:
+//! PetViewModel, RowLayout). What it does:
 //!
 //! 1. Window: undecorated, transparent, always-on-top, never activates/steals focus
 //!    (activation policy Accessory), visible on all Spaces and over full-screen apps
 //!    (NSWindow.collectionBehavior canJoinAllSpaces | fullScreenAuxiliary | stationary —
-//!    set via objc2-app-kit on the winit NSWindow handle). Draggable; origin persisted in
-//!    `AppConfig::{window_origin_x,window_origin_y}` (shared with the Swift app).
-//!    Single instance via `paths::overlay_lock_file()` (pid inside; stale lock replaced,
-//!    live pid → print "already running" and exit 0, like the Swift overlay).
-//! 2. State: poll `StateStore::load_all()` + `load_all_usage()` every 0.3 s (tick via
-//!    ControlFlow::WaitUntil). Focused session = attention-needed > busy > most recent
-//!    (`effective_state()`); label "<project>" or "<project> +N" with red-dot semantics
-//!    left for later. Sprite animation at the pet's fps over `frames_for(state)`.
+//!    set via objc2-app-kit on the winit NSWindow handle). Draggable (3 pt threshold, a
+//!    shorter press is a click); origin persisted in `AppConfig::{window_origin_x,
+//!    window_origin_y}` in AppKit bottom-left screen coordinates, shared with the Swift
+//!    app (`placement.rs`). Single instance via `paths::overlay_lock_file()`.
+//! 2. State (`logic.rs`): poll `StateStore::load_all()` + `load_all_usage()` every 0.3 s.
+//!    Focused session = pinned > attention-needed > busy > most recent. One card per
+//!    session when fanned out (click the pet / "Show all sessions side by side"), primary
+//!    in the middle and larger, side cards pinned by clicking (`row_layout.rs`); the
+//!    panel resizes around the primary pet so it never moves on screen.
 //! 3. Drawing (software compositor `draw.rs`, premultiplied RGBA with real alpha,
 //!    presented through the NSView's CALayer in `present_macos.rs`): pet sprite via
-//!    `render::frame_rgba`, speech bubble (rounded translucent capsule, system font via
-//!    `text.rs` with Hangul fallback, two lines max), battery gauge pill per
-//!    `AppConfig::gauge_metric`, session label capsule with the compact status badge
-//!    (red clock / orange ? / green check / red ! / blue gear / yellow wave). Click on the
-//!    pet = random `pet_phrases()` line for a few seconds; drag moves the window.
-//! 4. Tray (menu bar) icon 🐾 via tray-icon/muda: Pet submenu (built-ins + user pets,
-//!    check the selected one, "Reload pets"), Size (Small 3 / Medium 5 / Large 7),
-//!    Gauge submenu, toggles (hide bubble / click-through / hide pet), Reset position,
-//!    Quit. Selections persist through `AppConfig` (same keys as Swift).
-//!
-//! Deliberately deferred (documented in rust/README.md): session fan-out row, snapshot/
-//! click request files, per-session pinning.
+//!    `render::frame_rgba`, speech bubble over the primary pet (system font via `text.rs`
+//!    with Hangul fallback, two lines max), battery gauge pill per card, session label
+//!    capsule with the compact status badge. Motion (`animation.rs`): fan-out / fold
+//!    spring, done hop, error shake, floating heart on click, bubble fade-in, badge
+//!    pop-in, pulsing clock / ?, spinning gear.
+//! 4. Tray (menu bar) icon 🐾 via tray-icon/muda, also the pet's right-click menu
+//!    (`tray.rs`, Swift menu order): Sessions (pin / automatic), Gauge, fan-out toggle,
+//!    Pet, Size, toggles, Reset position, hooks / status line installers, hook log, Quit.
+//! 5. Test hooks: `claude-airou snapshot` / `claude-airou click` request files under the
+//!    airou home are answered every 0.4 s.
 //!
 //! Everything here is cfg(target_os = "macos"); keep the platform-specific window tweaks
-//! in one place so the future Windows/Linux backends only replace that corner.
+//! in one place (`present_macos.rs`) so the future Windows/Linux backends only replace
+//! that corner.
 
+mod animation;
 mod draw;
 mod lock;
 mod logic;
+mod placement;
 mod present_macos;
+mod row_layout;
 mod text;
 mod tray;
 mod window;

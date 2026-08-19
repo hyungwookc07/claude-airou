@@ -46,6 +46,21 @@ pub fn overlay_lock_file() -> PathBuf {
     root_dir().join("overlay.lock")
 }
 
+/// `claude-airou snapshot` drops this file; the running overlay answers by writing
+/// `snapshot_image_file()` (same names as Swift's `AppPaths`).
+pub fn snapshot_request_file() -> PathBuf {
+    root_dir().join("snapshot.request")
+}
+
+pub fn snapshot_image_file() -> PathBuf {
+    root_dir().join("snapshot.png")
+}
+
+/// `claude-airou click` writes the click target here; the overlay consumes it.
+pub fn click_request_file() -> PathBuf {
+    root_dir().join("click.request")
+}
+
 /// `~/.claude/settings.json` — where Claude Code reads hooks and the status line from.
 pub fn claude_settings_file() -> PathBuf {
     home_dir().join(".claude").join("settings.json")

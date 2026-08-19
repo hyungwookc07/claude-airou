@@ -330,6 +330,122 @@ fn preview_output(positional: &[String], parsed: &Parsed) -> CommandOutput {
 
 /// Tab-separated session dump incl. effective state, age and usage summary
 /// ("ctx 42% 5h 10% 7d 3% status_line").
+/// Seconds `snapshot` waits for the overlay to answer (Swift: 5 s deadline).
+const SNAPSHOT_TIMEOUT_SECS: f64 = 5.0;
+const SNAPSHOT_POLL_INTERVAL_SECS: f64 = 0.1;
+/// Name used when `--out` points at a directory (Swift: never replace a directory).
+const SNAPSHOT_DEFAULT_FILE_NAME: &str = "claude-airou-snapshot.png";
+
+/// Asks the running overlay to render itself to a PNG (works without screen-recording
+/// permission). Port of `runSnapshot`: drop `snapshot.request`, wait up to 5 s for
+/// `snapshot.png`, then print its path (or copy it to `--out`).
+pub fn run_snapshot(parsed: &Parsed) -> i32 {
+    let mut remaining_secs = SNAPSHOT_TIMEOUT_SECS;
+    run_snapshot_impl(parsed, &mut || {
+        if remaining_secs <= 0.0 {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_secs_f64(SNAPSHOT_POLL_INTERVAL_SECS));
+        remaining_secs -= SNAPSHOT_POLL_INTERVAL_SECS;
+        true
+    })
+}
+
+/// `wait_a_little` sleeps one poll interval and returns false once the deadline passed;
+/// injected so tests can answer the request themselves without a 5 s wait.
+fn run_snapshot_impl(parsed: &Parsed, wait_a_little: &mut dyn FnMut() -> bool) -> i32 {
+    let output_path: Option<PathBuf> = parsed.option("out").map(|raw| {
+        let expanded = crate::paths::expand_tilde(raw);
+        // `--out ~/Desktop` means "put snapshot.png in there", never "replace that directory".
+        if expanded.is_dir() {
+            expanded.join(SNAPSHOT_DEFAULT_FILE_NAME)
+        } else {
+            expanded
+        }
+    });
+    let image_path = crate::paths::snapshot_image_file();
+    let request_path = crate::paths::snapshot_request_file();
+    let prepared = crate::paths::ensure_dir(&crate::paths::root_dir()).and_then(|_| {
+        let _ = std::fs::remove_file(&image_path);
+        std::fs::write(&request_path, b"")
+    });
+    if let Err(error) = prepared {
+        eprint_line(&format!("claude-airou snapshot: {error}"));
+        return 1;
+    }
+    loop {
+        if image_path.is_file() {
+            match &output_path {
+                Some(output_path) => {
+                    let copied = std::fs::read(&image_path)
+                        .and_then(|data| crate::state_store::write_atomic(output_path, &data));
+                    match copied {
+                        Ok(()) => println!("{}", output_path.display()),
+                        Err(error) => {
+                            eprint_line(&format!(
+                                "claude-airou snapshot: could not copy to {}: {error}",
+                                output_path.display()
+                            ));
+                            return 1;
+                        }
+                    }
+                }
+                None => println!("{}", image_path.display()),
+            }
+            return 0;
+        }
+        if !wait_a_little() {
+            break;
+        }
+    }
+    let _ = std::fs::remove_file(&request_path);
+    eprint_line("claude-airou snapshot: no answer from the overlay — is `claude-airou run` running?");
+    1
+}
+
+/// Where a scripted click lands (the content of `click.request`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // consumed by the overlay
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClickTarget {
+    /// The centre of the primary pet.
+    Primary,
+    /// A content x coordinate in points from the panel's left edge.
+    ContentX(f64),
+}
+
+/// Parses a `click.request` body the way the Swift overlay does: a number is an x
+/// coordinate, the word `primary` is the primary pet, anything else is ignored.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // consumed by the overlay
+pub fn parse_click_request(text: &str) -> Option<ClickTarget> {
+    let trimmed = text.trim();
+    if let Ok(x) = trimmed.parse::<f64>() {
+        if x.is_finite() {
+            return Some(ClickTarget::ContentX(x));
+        }
+        return None;
+    }
+    if trimmed == "primary" {
+        return Some(ClickTarget::Primary);
+    }
+    None
+}
+
+/// Scripted click on the running overlay: `claude-airou click primary` or
+/// `claude-airou click 42` (x in points). Port of `runClick`: the target is written to
+/// `click.request` verbatim; the overlay parses it.
+pub fn run_click(positional: &[String]) -> i32 {
+    let target = positional.first().map(String::as_str).unwrap_or("primary");
+    let written = crate::paths::ensure_dir(&crate::paths::root_dir())
+        .and_then(|_| crate::state_store::write_atomic(&crate::paths::click_request_file(), target.as_bytes()));
+    match written {
+        Ok(()) => 0,
+        Err(error) => {
+            eprint_line(&format!("claude-airou click: {error}"));
+            1
+        }
+    }
+}
+
 pub fn run_status() -> i32 {
     for line in status_lines(&StateStore::default()) {
         println!("{line}");
@@ -955,5 +1071,90 @@ mod tests {
         );
         assert_eq!(lines[1], "s-mid\tmid\tdone → done\t5s ago\tDone!\t[5h 12% transcript]");
         assert_eq!(lines[2], "s-old\tother\thello → idle\t10s ago\tHi!");
+    }
+
+    #[test]
+    fn click_request_parsing_matches_swift() {
+        assert_eq!(parse_click_request("primary"), Some(ClickTarget::Primary));
+        assert_eq!(parse_click_request("  primary\n"), Some(ClickTarget::Primary));
+        assert_eq!(parse_click_request("42"), Some(ClickTarget::ContentX(42.0)));
+        assert_eq!(parse_click_request("117.5\n"), Some(ClickTarget::ContentX(117.5)));
+        assert_eq!(parse_click_request("-3"), Some(ClickTarget::ContentX(-3.0)));
+        assert_eq!(parse_click_request("nan"), None, "not finite");
+        assert_eq!(parse_click_request("inf"), None);
+        assert_eq!(parse_click_request("PRIMARY"), None);
+        assert_eq!(parse_click_request("left"), None);
+        assert_eq!(parse_click_request(""), None);
+    }
+
+    #[test]
+    fn click_writes_request_file_defaulting_to_primary() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set_home(dir.path());
+        assert_eq!(run_click(&[]), 0);
+        let request = dir.path().join("click.request");
+        assert_eq!(std::fs::read_to_string(&request).unwrap(), "primary");
+        assert_eq!(run_click(&args(&["135"])), 0);
+        assert_eq!(std::fs::read_to_string(&request).unwrap(), "135");
+        assert_eq!(parse_click_request(&std::fs::read_to_string(&request).unwrap()), Some(ClickTarget::ContentX(135.0)));
+    }
+
+    #[test]
+    fn snapshot_times_out_without_an_overlay_and_removes_the_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set_home(dir.path());
+        let mut polls = 0;
+        let code = run_snapshot_impl(&parsed(&[], &[]), &mut || {
+            polls += 1;
+            polls < 3
+        });
+        assert_eq!(code, 1);
+        assert_eq!(polls, 3);
+        assert!(!dir.path().join("snapshot.request").exists(), "request withdrawn on timeout");
+    }
+
+    #[test]
+    fn snapshot_prints_image_path_when_the_overlay_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set_home(dir.path());
+        // Stale image from an earlier run must be removed before asking.
+        std::fs::write(dir.path().join("snapshot.png"), b"stale").unwrap();
+        let image_path = dir.path().join("snapshot.png");
+        let request_path = dir.path().join("snapshot.request");
+        let mut answered = false;
+        let code = run_snapshot_impl(&parsed(&[], &[]), &mut || {
+            assert!(request_path.exists(), "request file is dropped first");
+            assert!(!answered || image_path.exists());
+            // Play the overlay: consume the request, write the PNG.
+            std::fs::remove_file(&request_path).unwrap();
+            std::fs::write(&image_path, b"png-bytes").unwrap();
+            answered = true;
+            true
+        });
+        assert_eq!(code, 0);
+        assert!(answered);
+        assert_eq!(std::fs::read(&image_path).unwrap(), b"png-bytes");
+    }
+
+    #[test]
+    fn snapshot_out_copies_into_directory_or_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set_home(dir.path());
+        let image_path = dir.path().join("snapshot.png");
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let mut answer = || {
+            std::fs::write(&image_path, b"png-bytes").unwrap();
+            true
+        };
+        let code = run_snapshot_impl(&parsed(&[("out", out_dir.to_str().unwrap())], &[]), &mut answer);
+        assert_eq!(code, 0);
+        assert_eq!(std::fs::read(out_dir.join("claude-airou-snapshot.png")).unwrap(), b"png-bytes");
+        assert!(out_dir.is_dir(), "a directory is never replaced");
+
+        let out_file = dir.path().join("shot.png");
+        let code = run_snapshot_impl(&parsed(&[("out", out_file.to_str().unwrap())], &[]), &mut answer);
+        assert_eq!(code, 0);
+        assert_eq!(std::fs::read(&out_file).unwrap(), b"png-bytes");
     }
 }

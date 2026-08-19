@@ -18,8 +18,8 @@ winit = "0.30"
 tray-icon = "0.19"
 ab_glyph = "0.2.32"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSApplication", "NSResponder", "NSRunningApplication", "NSView", "NSColor", "NSAppearance", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSApplication", "NSResponder", "NSRunningApplication", "NSView", "NSColor", "NSColorSpace", "NSAppearance", "NSScreen", "NSAlert", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSArray"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFData", "objc2"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGColorSpace", "CGDataProvider"] }

@@ -11,8 +11,12 @@
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, Message};
-use objc2_app_kit::{NSApplication, NSColor, NSView, NSWindow, NSWindowCollectionBehavior};
+use objc2_app_kit::{
+    NSAlert, NSAlertStyle, NSApplication, NSColor, NSColorSpace, NSScreen, NSView, NSWindow,
+    NSWindowCollectionBehavior,
+};
 use objc2_core_foundation::{CFData, CFRetained, CFType};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_core_graphics::{
     CGBitmapInfo, CGColorRenderingIntent, CGColorSpace, CGDataProvider, CGImage, CGImageAlphaInfo,
     CGImageByteOrderInfo,
@@ -22,6 +26,7 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::draw::Canvas;
+use super::placement::ScreenRect;
 
 /// Owns the layer that displays the canvas.
 pub struct LayerPresenter {
@@ -60,6 +65,103 @@ impl LayerPresenter {
         // the layer retains it, and CoreAnimation reads it on the main thread only.
         unsafe { self.layer.setContents(Some(image_object)) };
     }
+}
+
+/// Direct access to the winit window's `NSWindow`, in AppKit screen coordinates (points,
+/// bottom-left origin) — the same convention the Swift overlay stores in `config.json`.
+/// Positioning goes through here instead of winit so no coordinate flip is involved.
+pub struct AppKitWindow {
+    ns_window: Retained<NSWindow>,
+    view: Retained<NSView>,
+}
+
+impl AppKitWindow {
+    pub fn from_winit(window: &Window) -> Option<AppKitWindow> {
+        let view = content_view(window)?;
+        let ns_window = view.window()?;
+        Some(AppKitWindow { ns_window, view })
+    }
+
+    /// The window frame in AppKit screen coordinates.
+    pub fn frame(&self) -> ScreenRect {
+        rect_from_ns(self.ns_window.frame())
+    }
+
+    pub fn set_frame_origin(&self, x: f64, y: f64) {
+        self.ns_window.setFrameOrigin(NSPoint::new(x, y));
+    }
+
+    /// `setFrame(_:display:false)`: the next display pass draws the new content into the
+    /// new frame instead of flashing the old content centred in it for one frame.
+    pub fn set_frame(&self, frame: ScreenRect) {
+        self.ns_window.setFrame_display(
+            NSRect::new(NSPoint::new(frame.x, frame.y), NSSize::new(frame.width, frame.height)),
+            false,
+        );
+    }
+
+    /// Pops the menu up as a context menu at the mouse location (right-click on the pet).
+    pub fn show_context_menu(&self, menu: &tray_icon::menu::Menu) {
+        use tray_icon::menu::ContextMenu;
+        let view_pointer: *const NSView = &*self.view;
+        // SAFETY: the pointer is a live NSView of this window; muda only reads it on the
+        // main thread while the menu is up.
+        unsafe { menu.show_context_menu_for_nsview(view_pointer.cast(), None) };
+    }
+}
+
+fn rect_from_ns(rect: NSRect) -> ScreenRect {
+    ScreenRect::new(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height)
+}
+
+/// `NSScreen.screens.map(\.visibleFrame)` — every display's area minus menu bar and Dock.
+pub fn screen_visible_frames() -> Vec<ScreenRect> {
+    let Some(main_thread) = MainThreadMarker::new() else { return Vec::new() };
+    NSScreen::screens(main_thread)
+        .iter()
+        .map(|screen| rect_from_ns(screen.visibleFrame()))
+        .collect()
+}
+
+/// `(NSScreen.main ?? NSScreen.screens.first)?.visibleFrame`, with Swift's fallback rectangle.
+pub fn main_screen_visible_frame() -> ScreenRect {
+    let fallback = ScreenRect::new(0.0, 0.0, 1280.0, 800.0);
+    let Some(main_thread) = MainThreadMarker::new() else { return fallback };
+    let main_screen = NSScreen::mainScreen(main_thread).or_else(|| NSScreen::screens(main_thread).firstObject());
+    main_screen.map(|screen| rect_from_ns(screen.visibleFrame())).unwrap_or(fallback)
+}
+
+/// The user's accent colour (`NSColor.controlAccentColor`) as sRGB bytes; None off the main thread.
+pub fn accent_color_rgb() -> Option<(u8, u8, u8)> {
+    MainThreadMarker::new()?;
+    srgb_bytes(&NSColor::controlAccentColor())
+}
+
+/// `NSColor.windowBackgroundColor` resolved for the app's current appearance — the fill
+/// of the Swift overlay's bubble and capsules; None off the main thread.
+pub fn window_background_rgb() -> Option<(u8, u8, u8)> {
+    MainThreadMarker::new()?;
+    srgb_bytes(&NSColor::windowBackgroundColor())
+}
+
+fn srgb_bytes(color: &NSColor) -> Option<(u8, u8, u8)> {
+    let srgb = color.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+    let channel = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some((channel(srgb.redComponent()), channel(srgb.greenComponent()), channel(srgb.blueComponent())))
+}
+
+/// Modal alert like the Swift menu actions show (activates the app first so it is visible).
+pub fn show_alert(title: &str, body: &str, is_warning: bool) {
+    let Some(main_thread) = MainThreadMarker::new() else { return };
+    let alert = NSAlert::new(main_thread);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(body));
+    if is_warning {
+        alert.setAlertStyle(NSAlertStyle::Warning);
+    }
+    #[allow(deprecated)]
+    NSApplication::sharedApplication(main_thread).activateIgnoringOtherApps(true);
+    let _ = alert.runModal();
 }
 
 /// Whether the app currently renders in the dark appearance (drives the capsule palette).

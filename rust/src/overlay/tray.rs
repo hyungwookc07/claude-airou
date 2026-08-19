@@ -1,23 +1,37 @@
-//! Menu-bar (tray) icon and menu for the overlay, via `tray-icon`/`muda`.
-//! Menu structure per the v0.1 spec (a functional subset of Swift's
-//! `AppDelegate.populateMenu`): header + usage line, Pet submenu (built-ins + user
-//! pets, checked selection, "Reload pets"), Size (Small 3 / Medium 5 / Large 7),
-//! Gauge submenu, the three toggles, Reset position, Quit. Session pinning and the
-//! fan-out toggle are deferred.
+//! Menu-bar (tray) icon and menu for the overlay, via `tray-icon`/`muda`. The same menu
+//! doubles as the pet's right-click context menu. Structure and order follow Swift's
+//! `AppDelegate.populateMenu` 1:1: header + usage line, Sessions (N) submenu (Automatic +
+//! one pin entry per session), Gauge submenu (+ status line installer), the fan-out
+//! toggle, Pet submenu (built-ins + user pets, Reload, Open folder), Size, the three
+//! toggles, Reset position, hooks installer, hook log, Quit.
 
 use crate::model::GaugeMetric;
 use crate::pets::PetLibrary;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+/// One row of the Sessions submenu.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionMenuRow {
+    pub session_id: String,
+    /// "<project> — <state label>"
+    pub title: String,
+    pub is_pinned: bool,
+}
 
 /// Everything the tray menu needs to render; also acts as the rebuild signature.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuModel {
     pub header: String,
     pub usage_line: Option<String>,
+    /// Sessions in overlay order (newest first); empty hides the submenu.
+    pub sessions: Vec<SessionMenuRow>,
+    /// True when no session is pinned ("Automatic" is checked).
+    pub is_following_automatically: bool,
     /// (id, title, is_selected) per pet, in library order; title carries "  (custom)".
     pub pets: Vec<(String, String, bool)>,
     pub pixel_scale: f64,
     pub gauge_metric: GaugeMetric,
+    pub always_expanded: bool,
     pub bubbles_hidden: bool,
     pub click_through: bool,
     pub pet_hidden: bool,
@@ -43,14 +57,21 @@ impl MenuModel {
 /// What a clicked menu item means. Menu item ids round-trip through these.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuAction {
+    PinSession(String),
+    FollowSessionsAutomatically,
     SelectPet(String),
     SelectSize(f64),
     SelectGauge(GaugeMetric),
+    InstallStatusLine,
+    ToggleAlwaysExpanded,
     ToggleBubbles,
     ToggleClickThrough,
     TogglePetHidden,
     ReloadPets,
+    OpenPetsFolder,
     ResetPosition,
+    InstallHooks,
+    OpenHookLog,
     Quit,
 }
 
@@ -89,19 +110,29 @@ pub fn gauge_menu_title(metric: GaugeMetric) -> &'static str {
 
 pub fn menu_id_for(action: &MenuAction) -> String {
     match action {
+        MenuAction::PinSession(id) => format!("session:{id}"),
+        MenuAction::FollowSessionsAutomatically => "sessions:automatic".to_string(),
         MenuAction::SelectPet(id) => format!("pet:{id}"),
         MenuAction::SelectSize(scale) => format!("size:{scale}"),
         MenuAction::SelectGauge(metric) => format!("gauge:{}", gauge_raw(*metric)),
+        MenuAction::InstallStatusLine => "install-statusline".to_string(),
+        MenuAction::ToggleAlwaysExpanded => "toggle:always-expanded".to_string(),
         MenuAction::ToggleBubbles => "toggle:bubbles".to_string(),
         MenuAction::ToggleClickThrough => "toggle:click-through".to_string(),
         MenuAction::TogglePetHidden => "toggle:pet-hidden".to_string(),
         MenuAction::ReloadPets => "reload-pets".to_string(),
+        MenuAction::OpenPetsFolder => "open-pets-folder".to_string(),
         MenuAction::ResetPosition => "reset-position".to_string(),
+        MenuAction::InstallHooks => "install-hooks".to_string(),
+        MenuAction::OpenHookLog => "open-hook-log".to_string(),
         MenuAction::Quit => "quit".to_string(),
     }
 }
 
 pub fn action_for_menu_id(id: &str) -> Option<MenuAction> {
+    if let Some(session_id) = id.strip_prefix("session:") {
+        return Some(MenuAction::PinSession(session_id.to_string()));
+    }
     if let Some(pet_id) = id.strip_prefix("pet:") {
         return Some(MenuAction::SelectPet(pet_id.to_string()));
     }
@@ -112,11 +143,17 @@ pub fn action_for_menu_id(id: &str) -> Option<MenuAction> {
         return gauge_from_raw(raw).map(MenuAction::SelectGauge);
     }
     match id {
+        "sessions:automatic" => Some(MenuAction::FollowSessionsAutomatically),
+        "install-statusline" => Some(MenuAction::InstallStatusLine),
+        "toggle:always-expanded" => Some(MenuAction::ToggleAlwaysExpanded),
         "toggle:bubbles" => Some(MenuAction::ToggleBubbles),
         "toggle:click-through" => Some(MenuAction::ToggleClickThrough),
         "toggle:pet-hidden" => Some(MenuAction::TogglePetHidden),
         "reload-pets" => Some(MenuAction::ReloadPets),
+        "open-pets-folder" => Some(MenuAction::OpenPetsFolder),
         "reset-position" => Some(MenuAction::ResetPosition),
+        "install-hooks" => Some(MenuAction::InstallHooks),
+        "open-hook-log" => Some(MenuAction::OpenHookLog),
         "quit" => Some(MenuAction::Quit),
         _ => None,
     }
@@ -137,8 +174,8 @@ pub fn nearest_size_option(pixel_scale: f64) -> f64 {
         .unwrap_or(5.0)
 }
 
-/// Builds the whole tray menu from a `MenuModel`. Any muda error degrades to a menu
-/// with whatever items made it in (never panics on the tick path).
+/// Builds the whole tray menu from a `MenuModel` (Swift `populateMenu` order). Any muda
+/// error degrades to a menu with whatever items made it in (never panics on the tick path).
 pub fn build_menu(model: &MenuModel) -> Menu {
     let menu = Menu::new();
 
@@ -148,6 +185,62 @@ pub fn build_menu(model: &MenuModel) -> Menu {
         let usage = MenuItem::with_id("usage", usage_line, false, None);
         let _ = menu.append(&usage);
     }
+
+    // Sessions submenu: Automatic + one pin entry per session.
+    if !model.sessions.is_empty() {
+        let sessions_menu = Submenu::new(format!("Sessions ({})", model.sessions.len()), true);
+        let automatic = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::FollowSessionsAutomatically),
+            "Automatic (approval > busy > recent)",
+            true,
+            model.is_following_automatically,
+            None,
+        );
+        let _ = sessions_menu.append(&automatic);
+        let _ = sessions_menu.append(&PredefinedMenuItem::separator());
+        for row in &model.sessions {
+            let item = CheckMenuItem::with_id(
+                menu_id_for(&MenuAction::PinSession(row.session_id.clone())),
+                &row.title,
+                true,
+                row.is_pinned,
+                None,
+            );
+            let _ = sessions_menu.append(&item);
+        }
+        let _ = menu.append(&sessions_menu);
+    }
+
+    // Gauge submenu (+ status line installer).
+    let gauge_menu = Submenu::new("Gauge", true);
+    for metric in GAUGE_OPTIONS {
+        let item = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::SelectGauge(metric)),
+            gauge_menu_title(metric),
+            true,
+            metric == model.gauge_metric,
+            None,
+        );
+        let _ = gauge_menu.append(&item);
+    }
+    let _ = gauge_menu.append(&PredefinedMenuItem::separator());
+    let _ = gauge_menu.append(&MenuItem::with_id(
+        menu_id_for(&MenuAction::InstallStatusLine),
+        "Feed from Claude Code status line…",
+        true,
+        None,
+    ));
+    let _ = menu.append(&gauge_menu);
+
+    let expand = CheckMenuItem::with_id(
+        menu_id_for(&MenuAction::ToggleAlwaysExpanded),
+        "Show all sessions side by side",
+        true,
+        model.always_expanded,
+        None,
+    );
+    let _ = menu.append(&expand);
+
     let _ = menu.append(&PredefinedMenuItem::separator());
 
     // Pet submenu.
@@ -169,6 +262,12 @@ pub fn build_menu(model: &MenuModel) -> Menu {
         true,
         None,
     ));
+    let _ = pet_menu.append(&MenuItem::with_id(
+        menu_id_for(&MenuAction::OpenPetsFolder),
+        "Open pets folder…",
+        true,
+        None,
+    ));
     let _ = menu.append(&pet_menu);
 
     // Size submenu.
@@ -185,20 +284,6 @@ pub fn build_menu(model: &MenuModel) -> Menu {
         let _ = size_menu.append(&item);
     }
     let _ = menu.append(&size_menu);
-
-    // Gauge submenu.
-    let gauge_menu = Submenu::new("Gauge", true);
-    for metric in GAUGE_OPTIONS {
-        let item = CheckMenuItem::with_id(
-            menu_id_for(&MenuAction::SelectGauge(metric)),
-            gauge_menu_title(metric),
-            true,
-            metric == model.gauge_metric,
-            None,
-        );
-        let _ = gauge_menu.append(&item);
-    }
-    let _ = menu.append(&gauge_menu);
 
     let _ = menu.append(&PredefinedMenuItem::separator());
 
@@ -234,10 +319,27 @@ pub fn build_menu(model: &MenuModel) -> Menu {
 
     let _ = menu.append(&PredefinedMenuItem::separator());
     let _ = menu.append(&MenuItem::with_id(
+        menu_id_for(&MenuAction::InstallHooks),
+        "Install Claude Code hooks…",
+        true,
+        None,
+    ));
+    let _ = menu.append(&MenuItem::with_id(
+        menu_id_for(&MenuAction::OpenHookLog),
+        "Open hook log",
+        true,
+        None,
+    ));
+
+    let _ = menu.append(&PredefinedMenuItem::separator());
+    let _ = menu.append(&MenuItem::with_id(
         menu_id_for(&MenuAction::Quit),
         "Quit Claude Airou",
         true,
-        None,
+        Some(tray_icon::menu::accelerator::Accelerator::new(
+            Some(tray_icon::menu::accelerator::Modifiers::META),
+            tray_icon::menu::accelerator::Code::KeyQ,
+        )),
     ));
 
     menu
@@ -284,6 +386,13 @@ mod tests {
     #[test]
     fn menu_ids_round_trip() {
         let actions = [
+            MenuAction::PinSession("abc-123".to_string()),
+            MenuAction::FollowSessionsAutomatically,
+            MenuAction::InstallStatusLine,
+            MenuAction::ToggleAlwaysExpanded,
+            MenuAction::OpenPetsFolder,
+            MenuAction::InstallHooks,
+            MenuAction::OpenHookLog,
             MenuAction::SelectPet("airou-felyne".to_string()),
             MenuAction::SelectSize(3.0),
             MenuAction::SelectSize(7.0),

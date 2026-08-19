@@ -975,6 +975,27 @@ impl McpInstaller {
     }
 }
 
+// MARK: - Overlay menu entry points (Swift: AppDelegate.installHooks / installStatusLine)
+
+/// Installs the hooks into the default Claude settings; Ok carries the report summary
+/// (shown in an alert by the overlay), Err the failure text.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn install_hooks_from_menu() -> Result<String, String> {
+    HooksInstaller::new(crate::paths::claude_settings_file())
+        .install()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
+/// Wires the status line feed into the default Claude settings (see `install_hooks_from_menu`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn install_statusline_from_menu() -> Result<String, String> {
+    StatusLineInstaller::new(crate::paths::claude_settings_file())
+        .install()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
 // MARK: - CLI wrappers (port of the run* helpers in CommandLineInterface.swift)
 
 pub fn run_install_hooks(parsed: &Parsed) -> i32 {
