@@ -17,9 +17,11 @@ USAGE
   claude-airou uninstall             Undo setup (hooks, status line, MCP, skill, login item);
                                    keeps ~/.claude-airou and the binary itself
   claude-airou hook                  Claude Code hook entry point (reads hook JSON on stdin)
-  claude-airou install-hooks [--print] [--settings PATH]
+  claude-airou install-hooks [--print] [--settings PATH] [--hook-format exec|shell]
                                    Merge hook entries into ~/.claude/settings.json (backup first)
                                    --print only prints the JSON snippet, changes nothing
+                                   --hook-format overrides the shape picked from `claude
+                                   --version` (exec form needs Claude Code 2.1.139+)
   claude-airou uninstall-hooks [--settings PATH]
   claude-airou install-statusline [--settings PATH]
                                    Feed the usage gauge from the Claude Code status line; your
