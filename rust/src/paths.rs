@@ -71,6 +71,9 @@ pub fn claude_desktop_config_file() -> PathBuf {
         .join("Claude/claude_desktop_config.json")
 }
 
+/// Known deviation from Swift's `expandingTildeInPath`: the `~otheruser/…` form is not
+/// expanded (needs a passwd lookup); only `~` and `~/…` are. Nobody sets that form in
+/// practice, and both binaries agree on the common cases.
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         return home_dir().join(rest);
@@ -79,6 +82,62 @@ pub fn expand_tilde(path: &str) -> PathBuf {
         return home_dir();
     }
     PathBuf::from(path)
+}
+
+// MARK: - Legacy (the project was called claude-pet before it became claude-airou)
+
+/// Moves `~/.claude-pet` to `~/.claude-airou` once, so config, pets, state and the
+/// status-line passthrough survive the rename. No-op when a home override is set or the
+/// new dir exists. Port of Swift's `AppPaths.migrateLegacyDirectoryIfNeeded`, run before
+/// every command (see main.rs).
+pub fn migrate_legacy_dir_if_needed() {
+    if std::env::var_os("CLAUDE_AIROU_HOME").is_some() {
+        return;
+    }
+    migrate_legacy_dir(&home_dir().join(".claude-pet"), &home_dir().join(".claude-airou"));
+}
+
+/// Testable core: rename `legacy` onto `new` when only `legacy` exists; the overlay lock
+/// and per-session state are transient (hooks refill state), so the lock is dropped.
+fn migrate_legacy_dir(legacy: &std::path::Path, new: &std::path::Path) {
+    if new.exists() || !legacy.exists() {
+        return;
+    }
+    match std::fs::rename(legacy, new) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(new.join("overlay.lock"));
+        }
+        Err(error) => crate::logging::eprint_line(&format!(
+            "claude-airou: could not migrate {} → {}: {error}",
+            legacy.display(),
+            new.display()
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn migrates_only_when_new_dir_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".claude-pet");
+        let new = dir.path().join(".claude-airou");
+        std::fs::create_dir_all(legacy.join("pets")).unwrap();
+        std::fs::write(legacy.join("config.json"), b"{}").unwrap();
+        std::fs::write(legacy.join("overlay.lock"), b"123").unwrap();
+
+        super::migrate_legacy_dir(&legacy, &new);
+        assert!(!legacy.exists());
+        assert!(new.join("config.json").exists());
+        assert!(new.join("pets").exists());
+        assert!(!new.join("overlay.lock").exists(), "transient lock is dropped");
+
+        // Second run (legacy gone) and a run with both dirs present are no-ops.
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("other.json"), b"{}").unwrap();
+        super::migrate_legacy_dir(&legacy, &new);
+        assert!(legacy.join("other.json").exists(), "never overwrites an existing new dir");
+    }
 }
 
 pub fn ensure_dir(path: &std::path::Path) -> std::io::Result<()> {

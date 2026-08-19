@@ -346,6 +346,11 @@ fn url_host(url: &str) -> Option<String> {
 }
 
 /// Port of `ToolSummarizer.truncate` (100 chars max, ellipsis).
+///
+/// Known deviation: Swift `String.count` counts extended grapheme clusters; `chars()`
+/// counts Unicode scalars, so ZWJ emoji and NFD-decomposed text hit the limit earlier here
+/// (never a panic — `char` boundaries are always valid). Exact parity would need a
+/// grapheme-segmentation dependency; the bubble is a preview, so the trade is accepted.
 pub fn truncate(text: &str) -> String {
     if text.chars().count() <= MAX_CHARACTERS {
         return text.to_string();

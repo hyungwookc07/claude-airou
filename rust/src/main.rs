@@ -21,6 +21,8 @@ mod statusline;
 mod overlay;
 
 fn main() {
+    // Like Swift's main: adopt a pre-rename ~/.claude-pet directory before any command runs.
+    paths::migrate_legacy_dir_if_needed();
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     std::process::exit(cli::dispatch(arguments));
 }

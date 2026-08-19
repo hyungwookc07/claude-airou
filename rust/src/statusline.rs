@@ -13,8 +13,14 @@ use std::path::PathBuf;
 
 /// Hook events on which the estimate is refreshed (Swift:
 /// `TranscriptContextEstimator.refreshingEventNames`).
-pub const REFRESHING_EVENT_NAMES: [&str; 4] =
-    ["PostToolUse", "PostToolBatch", "Stop", "UserPromptSubmit"];
+pub const REFRESHING_EVENT_NAMES: [&str; 6] = [
+    "UserPromptSubmit",
+    "PostToolUse",
+    "PostToolBatch",
+    "Stop",
+    "SessionStart",
+    "PostCompact",
+];
 
 /// Set in the passthrough's environment; if we ever see it on our own stdin path we are
 /// being invoked by ourselves and must not spawn again (Swift:

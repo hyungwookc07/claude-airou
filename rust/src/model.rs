@@ -1,7 +1,9 @@
-//! Core data types, byte-compatible on disk with the Swift app's `Models/PetState.swift`,
+//! Core data types, format-compatible on disk with the Swift app's `Models/PetState.swift`,
 //! `Models/SessionUsageSnapshot.swift` and `State/AppConfig.swift`. Field names and enum raw
 //! values must never drift from the Swift side: both implementations read and write the same
-//! `~/.claude-airou` files.
+//! `~/.claude-airou` files. ("Format-compatible" = each side decodes the other's files;
+//! key order and number formatting may differ — Swift sorts keys and prints whole doubles
+//! without a fraction, serde_json keeps declaration order and prints `1.0`.)
 
 use serde::{Deserialize, Serialize};
 
@@ -331,6 +333,16 @@ pub enum GaugeMetric {
 }
 
 impl GaugeMetric {
+    pub fn from_raw(raw: &str) -> Option<GaugeMetric> {
+        match raw {
+            "context_remaining" => Some(GaugeMetric::ContextRemaining),
+            "five_hour_remaining" => Some(GaugeMetric::FiveHourRemaining),
+            "seven_day_remaining" => Some(GaugeMetric::SevenDayRemaining),
+            "off" => Some(GaugeMetric::Off),
+            _ => None,
+        }
+    }
+
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay gauge
     pub fn value(self, usage: Option<&SessionUsageSnapshot>) -> Option<f64> {
         let usage = usage?;
@@ -359,7 +371,19 @@ pub struct AppConfig {
     pub is_click_through: bool,
     pub is_pet_hidden: bool,
     pub is_sessions_always_expanded: bool,
+    #[serde(deserialize_with = "lenient_gauge_metric")]
     pub gauge_metric: GaugeMetric,
+}
+
+/// Unknown or null `gaugeMetric` string values fall back to the default while the rest of
+/// the config is kept — mirrors Swift's AppConfig ("unknown value → default, keep the rest
+/// of the config"). A non-string value still fails the whole decode, also like Swift.
+fn lenient_gauge_metric<'de, D>(deserializer: D) -> Result<GaugeMetric, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.as_deref().and_then(GaugeMetric::from_raw).unwrap_or_default())
 }
 
 impl Default for AppConfig {
@@ -489,6 +513,29 @@ mod tests {
             pending_tool_use_id: None,
         };
         assert_eq!(snapshot.effective_state(), PetState::Idle);
+    }
+
+    #[test]
+    fn unknown_gauge_metric_keeps_the_rest_of_the_config() {
+        // Swift AppConfig: "unknown value → default, keep the rest of the config".
+        let json = r#"{"pixelScale": 7.0, "selectedPetId": "mochi-cat", "gaugeMetric": "some_future_metric"}"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.gauge_metric, GaugeMetric::ContextRemaining);
+        assert_eq!(config.pixel_scale, 7.0);
+        assert_eq!(config.selected_pet_id.as_deref(), Some("mochi-cat"));
+
+        let null_json = r#"{"pixelScale": 3.0, "gaugeMetric": null}"#;
+        let config: AppConfig = serde_json::from_str(null_json).unwrap();
+        assert_eq!(config.gauge_metric, GaugeMetric::ContextRemaining);
+        assert_eq!(config.pixel_scale, 3.0);
+
+        // Non-string still fails the whole decode (Swift throws there too); load_from then
+        // falls back to a full default config.
+        assert!(serde_json::from_str::<AppConfig>(r#"{"gaugeMetric": 3}"#).is_err());
+
+        let known = r#"{"gaugeMetric": "five_hour_remaining"}"#;
+        let config: AppConfig = serde_json::from_str(known).unwrap();
+        assert_eq!(config.gauge_metric, GaugeMetric::FiveHourRemaining);
     }
 
     #[test]

@@ -124,6 +124,14 @@ impl PetDefinition {
     /// #RRGGBB/#RRGGBBAA colors, frames.idle required, uniform grid (min 4, max 64),
     /// every used char in palette, unknown state keys warned, unused palette keys warned,
     /// missing states warned with their fallback, duplicate problems deduped in order.
+    ///
+    /// Known deviations (both only reachable with pathological input, never a panic):
+    /// - "one character" means one Unicode scalar (`char`) here vs one grapheme cluster in
+    ///   Swift — a flag/ZWJ-emoji palette key validates in Swift but is rejected here, and
+    ///   row widths count scalars, not graphemes. Pet art is single-scalar in practice.
+    /// - Trimming uses Rust `str::trim` (includes newlines) vs Swift `.whitespaces`
+    ///   (spaces + tab only), so e.g. a `"#RRGGBB\n"` color passes here but not in Swift,
+    ///   and a newline-only `name` fails here but passes in Swift.
     pub fn validate(&self) -> Result<Vec<String>, ValidationError> {
         let mut problems: Vec<String> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();

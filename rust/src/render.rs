@@ -25,11 +25,32 @@ pub fn render_all(
     let palette = ResolvedPalette::new(pet);
     let mut written: Vec<PathBuf> = Vec::new();
 
-    let mut max_frame_count = 0usize;
+    // Sheet geometry first: validation caps the grid at 64x64 but not the frame count, so
+    // size the sheet in u64 and refuse absurd ones with a clean error instead of aborting
+    // on allocation (rust-only guard; Swift fails via a thrown CGContext error, but only
+    // after writing the per-frame PNGs — failing before any file is written is deliberate).
+    let (grid_width, grid_height) = pet.grid_size();
+    let cell_width = grid_width as u32 * pixel_scale;
+    let cell_height = grid_height as u32 * pixel_scale;
+    let gutter = pixel_scale * 2;
+    let max_frame_count = PetState::ALL
+        .iter()
+        .map(|state| pet.frames_for(*state).len())
+        .max()
+        .unwrap_or(0);
+    const MAX_SHEET_BYTES: u64 = 512 * 1024 * 1024;
+    let sheet_width_u64 = max_frame_count as u64 * (cell_width as u64 + gutter as u64) + gutter as u64;
+    let sheet_height_u64 = PetState::ALL.len() as u64 * (cell_height as u64 + gutter as u64) + gutter as u64;
+    if sheet_width_u64.saturating_mul(sheet_height_u64).saturating_mul(4) > MAX_SHEET_BYTES {
+        return Err(format!(
+            "could not create sheet context: {sheet_width_u64}x{sheet_height_u64} pixels is too large — reduce --scale or the number of frames"
+        ));
+    }
+    let sheet_width = sheet_width_u64 as u32;
+    let sheet_height = sheet_height_u64 as u32;
+
     for state in PetState::ALL {
-        let frames = pet.frames_for(state);
-        max_frame_count = max_frame_count.max(frames.len());
-        for (index, frame) in frames.iter().enumerate() {
+        for (index, frame) in pet.frames_for(state).iter().enumerate() {
             let (rgba, width, height) = frame_rgba(frame, &palette, pixel_scale, background)?;
             let path = output_dir.join(format!("{}_{index}.png", state.raw()));
             write_png(&path, width, height, &rgba)?;
@@ -38,12 +59,6 @@ pub fn render_all(
     }
 
     // Contact sheet: rows = states (in PetState order), columns = frames.
-    let (grid_width, grid_height) = pet.grid_size();
-    let cell_width = grid_width as u32 * pixel_scale;
-    let cell_height = grid_height as u32 * pixel_scale;
-    let gutter = pixel_scale * 2;
-    let sheet_width = max_frame_count as u32 * (cell_width + gutter) + gutter;
-    let sheet_height = PetState::ALL.len() as u32 * (cell_height + gutter) + gutter;
 
     // Swift fills the sheet with alpha forced to 1 regardless of the background's alpha.
     let base = background.unwrap_or(DEFAULT_SHEET_BACKGROUND);
@@ -81,8 +96,16 @@ pub fn frame_rgba(
     if grid_width == 0 || grid_height == 0 {
         return Err("frame is empty".to_string());
     }
-    let width = grid_width as u32 * pixel_scale;
-    let height = grid_height as u32 * pixel_scale;
+    // 64x64 grid at scale 64 is exactly 64 MB of RGBA — anything beyond that means an
+    // unvalidated definition; fail cleanly rather than overflow or abort on allocation.
+    const MAX_FRAME_BYTES: u64 = 64 * 1024 * 1024;
+    let width_u64 = grid_width as u64 * pixel_scale as u64;
+    let height_u64 = grid_height as u64 * pixel_scale as u64;
+    if width_u64.saturating_mul(height_u64).saturating_mul(4) > MAX_FRAME_BYTES {
+        return Err(format!("frame too large to render ({width_u64}x{height_u64} pixels)"));
+    }
+    let width = width_u64 as u32;
+    let height = height_u64 as u32;
     let mut buffer = vec![0u8; width as usize * height as usize * 4];
     if let Some(color) = background {
         for pixel in buffer.chunks_exact_mut(4) {
@@ -307,6 +330,28 @@ mod tests {
     #[test]
     fn tiny_pet_is_valid() {
         tiny_pet().validate().expect("tiny pet must validate (warnings only)");
+    }
+
+    #[test]
+    fn oversized_sheet_fails_cleanly_before_writing_anything() {
+        // 4x4 grid, scale 64, 3000 idle frames → sheet ≈ 1.15M x 3.2K px ≈ 59 GB of RGBA.
+        let mut pet = tiny_pet();
+        let frame = pet.frames.get("idle").unwrap()[0].clone();
+        pet.frames.insert("idle".to_string(), vec![frame; 3000]);
+        let dir = tempfile::tempdir().unwrap();
+        let error = render_all(&pet, dir.path(), 64, None).expect_err("must refuse");
+        assert!(error.contains("could not create sheet context"), "got: {error}");
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 0, "no per-frame PNGs before the guard");
+    }
+
+    #[test]
+    fn oversized_frame_fails_cleanly() {
+        // An unvalidated 100k-wide row must not overflow u32 or abort on allocation.
+        let palette = ResolvedPalette::new(&tiny_pet());
+        let frame = vec!["r".repeat(100_000); 4];
+        let error = frame_rgba(&frame, &palette, 64, None).expect_err("must refuse");
+        assert!(error.contains("frame too large"), "got: {error}");
     }
 
     #[test]

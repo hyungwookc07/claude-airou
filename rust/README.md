@@ -54,6 +54,26 @@ run its own installers (they edit the same config files, with backups):
 - Session cleanup on SIGTERM is best-effort (no signal-handling crate); the overlay's
   stale-state decay covers the gap.
 
+## Known deviations from Swift
+
+Deliberate, all edge-case-only (an adversarial review pass hunted for more; anything not
+listed here is meant to match 1:1 — file a bug if it doesn't):
+
+- **Files are format-compatible, not byte-identical.** Each binary decodes the other's
+  files; key order and float formatting differ (Swift sorts keys and prints `1755500000`,
+  serde_json keeps declaration order and prints `1755500000.0`).
+- **"1 character" = 1 Unicode scalar, not 1 grapheme.** Bubble truncation and pet
+  validation count scalars (`char`), Swift counts grapheme clusters — ZWJ emoji and
+  NFD-decomposed text diverge (never a crash). Palette keys are single-scalar in practice.
+- **Whitespace trimming** uses Rust `str::trim` (includes newlines) where Swift's pet
+  validation uses spaces+tab only; verdicts differ only for pathological inputs like
+  `"#112233\n"`.
+- **Error wording** for unreadable/malformed pet files comes from serde/std instead of
+  Cocoa's `localizedDescription`; validation problem strings themselves match 1:1.
+- `CLAUDE_AIROU_HOME=~user/...` (the *other-user* tilde form) is not expanded; `~/` is.
+- Rust-only safety guard: absurdly large render sheets fail with a clean error before any
+  file is written instead of aborting on allocation.
+
 ## Roadmap to full replacement
 
 1. **v0.1 (this)** — core parity + first overlay. Validate the overlay on real macOS:
