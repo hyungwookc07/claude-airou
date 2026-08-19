@@ -1,0 +1,82 @@
+# Tag a version (`git tag v0.0.1 && git push origin v0.0.1`) and this builds a universal
+# macOS binary and publishes it as a GitHub release. install.sh reads releases/latest, so
+# publishing here is what makes the one-line installer serve the new version.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Apple Silicon runner; the Intel slice is cross-compiled from here.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain (both macOS targets)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Unit tests
+        # The end-to-end battery (rust/integration_test.py) drives a real overlay window and
+        # is local-only; cargo test is the CI gate.
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Check that the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' rust/Cargo.toml | head -1)"
+          if [ "$tag_version" != "$crate_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match rust/Cargo.toml version $crate_version" >&2
+            exit 1
+          fi
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --manifest-path rust/Cargo.toml --target aarch64-apple-darwin
+          cargo build --release --manifest-path rust/Cargo.toml --target x86_64-apple-darwin
+
+      - name: Merge into a universal binary and package it
+        run: |
+          mkdir -p dist
+          lipo -create -output dist/claude-airou \
+            rust/target/aarch64-apple-darwin/release/claude-airou \
+            rust/target/x86_64-apple-darwin/release/claude-airou
+          lipo -info dist/claude-airou
+          chmod 755 dist/claude-airou
+          tar -czf dist/claude-airou-macos-universal.tar.gz -C dist claude-airou
+          shasum -a 256 dist/claude-airou-macos-universal.tar.gz > dist/claude-airou-macos-universal.tar.gz.sha256
+          cat dist/claude-airou-macos-universal.tar.gz.sha256
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/claude-airou-macos-universal.tar.gz \
+            dist/claude-airou-macos-universal.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-airou-macos-universal
+          path: dist/claude-airou-macos-universal.tar.gz
