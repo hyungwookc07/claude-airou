@@ -4,7 +4,7 @@ A desktop pet for Claude Code. (Named after the Airou — the Felyne/Palico comp
 creature floats in a corner of your screen and shows what Claude is doing right now:
 **thinking / working / waiting for approval / needs your input / done / error**.
 
-- Native macOS overlay (Swift, AppKit + SwiftUI). Zero dependencies, one binary.
+- Native macOS overlay written in Rust (winit + a CALayer-presented software compositor + tray menu). One binary, no runtime dependencies.
 - Driven by Claude Code **hooks**, so it works with the terminal CLI, the desktop app and IDE extensions alike.
 - **Claude chat** (the Claude desktop app) works too: an MCP server (`make mcp`) lets chat drive the pet and hatch new ones — [see below](#using-it-from-claude-chat-the-claude-desktop-app).
 - Always on top, never steals focus, visible on every Space and over full-screen apps. Drag it anywhere; it remembers where it was.
@@ -22,7 +22,7 @@ Built-in pets — **Airou** (the namesake and default: a Felyne-style hunting ca
 
 ## Install
 
-Requirements: macOS 14+, a Swift 5.9+ toolchain (Xcode or the Command Line Tools).
+Requirements: macOS 14+, a Rust toolchain ([rustup](https://rustup.rs), stable ≥ 1.85).
 
 ```bash
 git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
@@ -61,7 +61,7 @@ Claude Code ──hook event (JSON on stdin)──▶ claude-airou hook ──�
 
 The hook binary never writes to stdout and always exits 0 (Claude Code feeds some events' hook stdout back into the model context). What it saw is logged to `~/.claude-airou/hook.log` (auto-truncated).
 
-Parallel tool calls and subagents fire hooks with the same `session_id`, so the hook merges instead of blindly overwriting: while a session is waiting for approval or an answer, sibling `PostToolUse` events and subagent events are ignored; the wait clears when *that* tool call (`tool_use_id`) finishes, or on `PostToolBatch` / `Stop` / `UserPromptSubmit` (`Hook/HookMergePolicy.swift`).
+Parallel tool calls and subagents fire hooks with the same `session_id`, so the hook merges instead of blindly overwriting: while a session is waiting for approval or an answer, sibling `PostToolUse` events and subagent events are ignored; the wait clears when *that* tool call (`tool_use_id`) finishes, or on `PostToolBatch` / `Stop` / `UserPromptSubmit` (`rust/src/hook_mapper.rs`).
 
 ### Known limitations
 
@@ -166,7 +166,7 @@ To write one by hand, follow the format in [skills/hatch-pet/SKILL.md](skills/ha
 - Missing states fall back automatically (`working→thinking→idle`, `hello→done→idle`, …).
 - The overlay draws the status badge (red clock, green check, …) itself, so the sprite only needs a change of expression.
 
-The built-in pets live in `Sources/ClaudeAirou/Resources/pets/` and are embedded into the binary at build time.
+The built-in pets live in [`pets/`](pets/) and are embedded into the binary at build time.
 
 ## Troubleshooting
 
@@ -183,22 +183,23 @@ make uninstall          # removes the hooks and the MCP entry (with backups), th
 rm -rf ~/.claude-airou    # also removes settings, custom pets and state
 ```
 
-## Rust port
+## The Rust crate
 
-A cross-platform rewrite lives in [`rust/`](rust/README.md) — same CLI, same on-disk formats
-(the two binaries can be mixed freely: e.g. Swift overlay + Rust hook/MCP), macOS overlay
-first, Windows and Linux next. The long-term plan is for it to replace the Swift app; the
-roadmap and current limitations are in its README. 러스트 공부를 겸해 읽는 가이드는
-[`rust/LEARNING.ko.md`](rust/LEARNING.ko.md).
+The app is a single Rust crate in [`rust/`](rust/README.md) (macOS overlay today, Windows and
+Linux overlays next; the hook, status line, MCP server and CLI already run everywhere). It
+started life as a Swift/AppKit app and was ported 1:1 — the Swift original was removed in
+v1.0 and is still in git history (commit `3037817`). Roadmap and known gaps are in the
+crate's README. 러스트 공부를 겸해 읽는 가이드는 [`rust/LEARNING.ko.md`](rust/LEARNING.ko.md).
 
 ## Development
 
 ```bash
-swift build && .build/debug/claude-airou run
+make build && ./rust/target/release/claude-airou run   # or: cd rust && cargo run -- run
+make test               # cargo test + the end-to-end battery (rust/integration_test.py)
 make render-all         # renders every built-in pet to render/<id>/sheet.png
 ```
 
-Layout: `Sources/ClaudeAirou/{Hook,MCP,State,Pets,UI,Install,CLI}`. The event → state mapping lives in one place, `Hook/HookEventMapper.swift`; the merge rules for concurrent events are in `Hook/HookMergePolicy.swift`; the chat-side tools are in `MCP/MCPPetTools.swift`.
+Layout: `rust/src/{hook,hook_mapper,mcp,mcp_tools,statusline,install,pets,render,state_store,cli,cli_commands}.rs` + `rust/src/overlay/` (macOS). The event → state mapping lives in one place, `hook_mapper.rs`, together with the merge rules for concurrent events; the chat-side tools are in `mcp_tools.rs`; the pet art is in `pets/`.
 
 ## License
 

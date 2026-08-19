@@ -1,6 +1,3 @@
-.build/
-.swiftpm/
 render/
-*.xcodeproj
 .DS_Store
 rust/target/

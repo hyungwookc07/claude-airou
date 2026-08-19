@@ -2,7 +2,7 @@
 name = "claude-airou"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform rewrite of the claude-airou desktop pet (macOS first). Shares all on-disk formats with the Swift app."
+description = "claude-airou — a desktop pet for Claude Code (macOS overlay, hook, status line, MCP server)."
 license = "MIT"
 
 [dependencies]

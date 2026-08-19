@@ -190,6 +190,6 @@ def dump(obj, indent=0):
         return "[\n" + ",\n".join(f'{pad}  {dump(x, indent + 1)}' for x in obj) + f"\n{pad}]"
     return json.dumps(obj, ensure_ascii=False)
 
-out = pathlib.Path(__file__).resolve().parent.parent / "Sources" / "ClaudeAirou" / "Resources" / "pets" / "clawd-claude.json"
+out = pathlib.Path(__file__).resolve().parent.parent / "pets" / "clawd-claude.json"
 out.write_text(dump(pet) + "\n")
 print("wrote", out)

@@ -10,7 +10,7 @@ signature paw hammer planted on the ground beside it.
 Silhouette pieces are painted into a mask, the outline is derived automatically (mask pixels
 touching transparency), then features and gear are overlaid. States only change eyes / mouth /
 props / one paw, so the body stays put.
-Run:  python3 docs/make_airou.py && claude-airou validate Sources/ClaudeAirou/Resources/pets/airou-felyne.json
+Run:  python3 docs/make_airou.py && claude-airou validate pets/airou-felyne.json
 """
 import json
 import pathlib
@@ -406,6 +406,6 @@ def dump(obj, indent=0):
         return "[\n" + ",\n".join(f'{pad}  {dump(x, indent + 1)}' for x in obj) + f"\n{pad}]"
     return json.dumps(obj, ensure_ascii=False)
 
-out = pathlib.Path(__file__).resolve().parent.parent / "Sources" / "ClaudeAirou" / "Resources" / "pets" / "airou-felyne.json"
+out = pathlib.Path(__file__).resolve().parent.parent / "pets" / "airou-felyne.json"
 out.write_text(dump(pet) + "\n")
 print("wrote", out)

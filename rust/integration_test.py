@@ -8,6 +8,7 @@ passthrough, a full MCP conversation (hatch_pet returns a real PNG), all three
 installers against fixture files, Swift-formatted file interop, and robustness
 (garbage input, hostile session ids, 20 concurrent hooks).
 
+    make test        (from the repo root: cargo test + this file)
     cd rust && cargo build --release && python3 integration_test.py
 
 Override the binary with CLAUDE_AIROU_BIN=/path/to/claude-airou.

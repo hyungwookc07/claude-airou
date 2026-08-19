@@ -5,7 +5,7 @@
 Claude Code용 데스크톱 펫. (이름은 몬스터헌터의 동료 고양이 아이루에서 — 퀘스트에 따라다니니까.) OpenAI Codex 앱의 펫처럼 화면 구석에 떠 있는 픽셀 캐릭터가
 Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / 에러** 인지 실시간으로 보여준다.
 
-- 네이티브 macOS 오버레이 (Swift, AppKit + SwiftUI). 외부 의존성 0, 바이너리 하나.
+- Rust로 만든 네이티브 macOS 오버레이 (winit + CALayer로 띄우는 소프트웨어 컴포지터 + 트레이 메뉴). 바이너리 하나, 런타임 의존성 없음.
 - Claude Code **hooks**로 상태를 받는다 → 터미널 CLI, 데스크톱 앱, IDE 확장 어디서 돌려도 동작.
 - **클로드 챗**(Claude 데스크톱 앱)도 지원: MCP 서버(`make mcp`)로 챗의 Claude가 펫을 움직이고 새 펫도 부화시킨다 — [아래 참고](#클로드-챗데스크톱-앱에서-쓰기).
 - 항상 위에 떠 있고, 포커스를 뺏지 않고, 모든 Space/전체화면 위에 보인다. 드래그로 옮기고 위치를 기억한다.
@@ -20,7 +20,7 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 ## 설치
 
-요구사항: macOS 14+, Swift 5.9+ 툴체인 (Xcode 또는 Command Line Tools).
+요구사항: macOS 14+, Rust 툴체인 ([rustup](https://rustup.rs), stable ≥ 1.85).
 
 ```bash
 git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
@@ -60,7 +60,7 @@ Claude Code ──hook 이벤트(stdin JSON)──▶ claude-airou hook ──�
 hook 바이너리는 stdout에 아무것도 쓰지 않고 항상 exit 0 으로 끝난다 (Claude Code는 일부 이벤트의 hook stdout을 모델 컨텍스트에 넣기 때문). 무슨 일이 있었는지는 `~/.claude-airou/hook.log`에 남는다.
 
 병렬 도구 호출·서브에이전트도 같은 `session_id`로 hook을 쏘기 때문에 hook은 단순 덮어쓰기가 아니라 병합한다:
-승인/질문을 기다리는 동안 형제 도구의 `PostToolUse`나 서브에이전트 이벤트는 무시되고, 기다리던 그 도구(`tool_use_id`)가 끝나거나 `PostToolBatch`/`Stop`/`UserPromptSubmit`이 오면 풀린다 (`Hook/HookMergePolicy.swift`).
+승인/질문을 기다리는 동안 형제 도구의 `PostToolUse`나 서브에이전트 이벤트는 무시되고, 기다리던 그 도구(`tool_use_id`)가 끝나거나 `PostToolBatch`/`Stop`/`UserPromptSubmit`이 오면 풀린다 (`rust/src/hook_mapper.rs`).
 
 ### 알려진 한계
 
@@ -165,7 +165,7 @@ Claude Code에서:
 - 없는 상태는 자동 폴백 (`working→thinking→idle`, `hello→done→idle`, ...).
 - 상태 아이콘(빨간 시계, 초록 체크)은 오버레이가 그리므로 스프라이트는 표정만 바꾸면 된다.
 
-내장 펫 소스는 `Sources/ClaudeAirou/Resources/pets/`에 있고 빌드 시 바이너리에 임베드된다.
+내장 펫 소스는 [`pets/`](pets/)에 있고 빌드 시 바이너리에 임베드된다.
 
 ## 문제 해결
 
@@ -182,22 +182,23 @@ make uninstall          # hooks·MCP 항목 제거(백업 생성), 바이너리/
 rm -rf ~/.claude-airou    # 설정·펫·상태까지 지우려면
 ```
 
-## 러스트 포트
+## 러스트 크레이트
 
-크로스플랫폼 재작성판이 [`rust/`](rust/README.md)에 있다 — CLI도 온디스크 포맷도 동일해서
-두 바이너리를 섞어 쓸 수 있고(예: 오버레이는 Swift, hook/MCP는 Rust), macOS 오버레이부터
-시작해 윈도우·리눅스로 간다. 장기적으로는 Swift 앱을 완전히 대체하는 게 목표이며 로드맵과
-현재 한계는 해당 README에 있다. 이 코드베이스로 러스트를 공부하는 가이드는
+앱은 [`rust/`](rust/README.md)에 있는 러스트 크레이트 하나다 (오버레이는 현재 macOS, 윈도우·리눅스
+오버레이는 다음 단계; hook·상태줄·MCP 서버·CLI는 이미 어디서나 돈다). 원래 Swift/AppKit 앱으로
+시작해 1:1로 포팅했고, Swift 원본은 v1.0에서 삭제됐다 (git 히스토리, 커밋 `3037817`에 남아 있다).
+로드맵과 알려진 한계는 크레이트 README에 있다. 이 코드베이스로 러스트를 공부하는 가이드는
 [`rust/LEARNING.ko.md`](rust/LEARNING.ko.md).
 
 ## 개발
 
 ```bash
-swift build && .build/debug/claude-airou run
+make build && ./rust/target/release/claude-airou run   # 또는: cd rust && cargo run -- run
+make test               # cargo test + 엔드투엔드 배터리 (rust/integration_test.py)
 make render-all         # 내장 펫 전부 렌더 → render/<id>/sheet.png
 ```
 
-구조: `Sources/ClaudeAirou/{Hook,MCP,State,Pets,UI,Install,CLI}`. hook 이벤트 → 상태 매핑은 `Hook/HookEventMapper.swift` 한 곳에 있고, 챗용 도구는 `MCP/MCPPetTools.swift`에 있다.
+구조: `rust/src/{hook,hook_mapper,mcp,mcp_tools,statusline,install,pets,render,state_store,cli,cli_commands}.rs` + `rust/src/overlay/` (macOS). hook 이벤트 → 상태 매핑과 동시 이벤트 병합 규칙은 `hook_mapper.rs` 한 곳에 있고, 챗용 도구는 `mcp_tools.rs`에, 펫 도트 아트는 `pets/`에 있다.
 
 ## 라이선스
 

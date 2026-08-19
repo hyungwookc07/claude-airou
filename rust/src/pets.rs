@@ -17,14 +17,14 @@ pub const MAX_GRID_SIDE: usize = 64;
 /// The eight built-in pets, embedded from the Swift resource directory at compile time.
 /// Order here is the menu order (Airou first, like `BuiltInPets.embeddedJSONFiles`).
 pub const BUILT_IN_PET_SOURCES: [(&str, &str); 8] = [
-    ("airou-felyne.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/airou-felyne.json")),
-    ("mochi-cat.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/mochi-cat.json")),
-    ("quackers-duck.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/quackers-duck.json")),
-    ("boo-ghost.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/boo-ghost.json")),
-    ("jelly-slime.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/jelly-slime.json")),
-    ("bolt-robot.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/bolt-robot.json")),
-    ("inky-octopus.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/inky-octopus.json")),
-    ("clawd-claude.json", include_str!("../../Sources/ClaudeAirou/Resources/pets/clawd-claude.json")),
+    ("airou-felyne.json", include_str!("../../pets/airou-felyne.json")),
+    ("mochi-cat.json", include_str!("../../pets/mochi-cat.json")),
+    ("quackers-duck.json", include_str!("../../pets/quackers-duck.json")),
+    ("boo-ghost.json", include_str!("../../pets/boo-ghost.json")),
+    ("jelly-slime.json", include_str!("../../pets/jelly-slime.json")),
+    ("bolt-robot.json", include_str!("../../pets/bolt-robot.json")),
+    ("inky-octopus.json", include_str!("../../pets/inky-octopus.json")),
+    ("clawd-claude.json", include_str!("../../pets/clawd-claude.json")),
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

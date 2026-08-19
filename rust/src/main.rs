@@ -1,6 +1,6 @@
-//! claude-airou — Rust build. Command dispatch lives in `cli.rs`; on-disk formats are shared
-//! with the Swift app (see ../../Sources/ClaudeAirou). The overlay itself is macOS-only for
-//! now; every other subcommand is fully cross-platform.
+//! claude-airou. Command dispatch lives in `cli.rs`; on-disk formats are unchanged from the
+//! original Swift app (removed in v1.0 — see git history, commit 3037817). The overlay itself
+//! is macOS-only for now; every other subcommand is fully cross-platform.
 
 mod cli;
 mod cli_commands;

@@ -1,6 +1,6 @@
 //! Pure overlay state logic: which session each pet represents, what it says, which
 //! animation frame is showing, how the row of session cards is laid out and what a click
-//! does. Port of `Sources/ClaudeAirou/UI/PetViewModel.swift` (minus SwiftUI plumbing);
+//! does. Port of the Swift original's `UI/PetViewModel.swift` (minus SwiftUI plumbing);
 //! nothing here touches a window, so it is unit-tested without one.
 
 use super::row_layout::{GridSize, RowCard, RowLayout};

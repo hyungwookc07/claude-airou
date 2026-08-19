@@ -1,5 +1,5 @@
 //! Deterministic horizontal layout of one or more session "cards" (sprite + gauge + label).
-//! Port of `Sources/ClaudeAirou/UI/RowLayout.swift`: both the painter and the panel
+//! Port of the Swift original's `UI/RowLayout.swift`: both the painter and the panel
 //! placement derive geometry from this, so the panel can grow/shrink while keeping the
 //! primary pet exactly where it was on screen. Everything is in points (logical pixels).
 

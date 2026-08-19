@@ -1,17 +1,23 @@
 PREFIX     ?= $(HOME)/.local
 BIN_DIR    := $(PREFIX)/bin
-BINARY     := .build/release/claude-airou
+CARGO_MANIFEST := rust/Cargo.toml
+BINARY     := rust/target/release/claude-airou
 SKILL_DIR  := $(HOME)/.claude/skills/hatch-pet
 LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-airou.overlay.plist
 # Pre-rename artefacts (the project used to be "claude-pet"); cleaned up by install/uninstall.
 LEGACY_LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
 LEGACY_BINARY := $(BIN_DIR)/claude-pet
 
-.PHONY: build install hooks statusline mcp skill uninstall run demo render-all autostart no-autostart clean
+.PHONY: build test install hooks statusline mcp skill uninstall run demo render-all autostart no-autostart clean
 
-## Build a release binary (.build/release/claude-airou)
+## Build a release binary (rust/target/release/claude-airou)
 build:
-	swift build -c release
+	cargo build --release --manifest-path $(CARGO_MANIFEST)
+
+## Unit tests + the end-to-end battery (drives the release binary in a throwaway sandbox)
+test: build
+	cargo test --manifest-path $(CARGO_MANIFEST)
+	python3 rust/integration_test.py
 
 ## Copy the binary to ~/.local/bin/claude-airou
 install: build
@@ -61,7 +67,7 @@ demo: build
 
 ## Render every built-in pet to render/<id>/sheet.png
 render-all: build
-	@for f in Sources/ClaudeAirou/Resources/pets/*.json; do \
+	@for f in pets/*.json; do \
 		$(BINARY) render $$f --out render/$$(basename $$f .json) --scale 10; \
 	done
 
@@ -87,5 +93,5 @@ no-autostart:
 	rm -f $(LAUNCH_AGENT)
 
 clean:
-	swift package clean
+	cargo clean --manifest-path $(CARGO_MANIFEST)
 	rm -rf render

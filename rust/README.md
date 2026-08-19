@@ -1,9 +1,10 @@
-# claude-airou (Rust)
+# claude-airou (the Rust crate)
 
-The cross-platform rewrite of claude-airou — macOS first, Windows and Linux next.
-**End goal: this crate fully replaces the Swift app.** Until it reaches overlay parity,
-both implementations live side by side and share every on-disk format, so you can mix
-them freely (e.g. Swift overlay + Rust hook/MCP, or the other way around).
+This crate *is* claude-airou: the hook, status line, MCP server, installers, CLI and the
+macOS overlay. It started as a 1:1 port of the original Swift/AppKit app and replaced it in
+v1.0 (the Swift sources were removed; they live on in git history at commit `3037817`,
+which is what every "Swift" comparison below refers to). macOS overlay first, Windows and
+Linux next — everything except the overlay already runs on all three.
 
 한국어로 코드를 따라 읽고 싶다면 → [LEARNING.ko.md](LEARNING.ko.md) (이 코드베이스를 교재로 쓰는 러스트 학습 가이드).
 
@@ -11,36 +12,29 @@ them freely (e.g. Swift overlay + Rust hook/MCP, or the other way around).
 
 | Area | State |
 |---|---|
-| Core (`hook`, `mcp`, `statusline`, installers, CLI: simulate/pets/validate/render/preview/status) | Ported 1:1 from Swift, unit tests + end-to-end smoke run on Linux CI-style checks |
-| Overlay (floating pet, tray menu) | macOS v0.2 stage 2: at parity with the Swift overlay on real hardware — transparent CALayer-presented canvas, system-font text with Hangul (incl. SF's `trak` letter spacing), **session fan-out row** (primary pet in the middle, side pets with their own gauge/label/badge, unfold/fold springs, pinning by click or menu), Swift `RowLayout` geometry, the full tray/right-click menu, `snapshot` / `click` test commands, hop/shake/heart/pulse/spin animations, AppKit-convention window position shared with Swift. Emoji in bubbles and SIGTERM cleanup are the known gaps (see below) |
+| Core (`hook`, `mcp`, `statusline`, installers, CLI: simulate/pets/validate/render/preview/status) | Done (ported 1:1 from Swift), unit tests + end-to-end battery, runs on macOS/Linux/Windows |
+| Overlay (floating pet, tray menu) | macOS v1.0: at parity with the former Swift overlay on real hardware — transparent CALayer-presented canvas, system-font text with Hangul (incl. SF's `trak` letter spacing), **session fan-out row** (primary pet in the middle, side pets with their own gauge/label/badge, unfold/fold springs, pinning by click or menu), Swift `RowLayout` geometry, the full tray/right-click menu, `snapshot` / `click` test commands, hop/shake/heart/pulse/spin animations, AppKit-convention window position shared with Swift. Emoji in bubbles and SIGTERM cleanup are the known gaps (see below) |
 | Windows / Linux overlay | Not started (the rest of the binary already runs there) |
 
-Everything the binaries write — `~/.claude-airou/state/*.json`, `*.usage.json`, `config.json`,
+Everything the binary writes — `~/.claude-airou/state/*.json`, `*.usage.json`, `config.json`,
 pet packs, `~/.claude/settings.json` edits, `claude_desktop_config.json` edits — is
-byte-compatible with the Swift app. The built-in pets are `include_str!`-ed from
-`../Sources/ClaudeAirou/Resources/pets/`, so there is exactly one copy of the art in the repo.
+format-compatible with what the Swift app wrote, so upgrading needed no migration. The
+built-in pets are `include_str!`-ed from the repo-root [`../pets/`](../pets/) directory.
 
 ## Build & try (macOS)
 
 ```bash
-cd rust
-cargo build --release          # → target/release/claude-airou
-./target/release/claude-airou pets
-./target/release/claude-airou simulate demo   # watch it with the (Swift or Rust) overlay running
-./target/release/claude-airou run             # the Rust overlay itself (v0.2)
-./target/release/claude-airou snapshot --out ~/Desktop/airou.png   # ask the running overlay for a PNG
-./target/release/claude-airou click primary   # scripted click (expand / collapse / pet)
+make build                     # from the repo root → rust/target/release/claude-airou
+# or: cd rust && cargo build --release
+./rust/target/release/claude-airou pets
+./rust/target/release/claude-airou simulate demo   # watch it with the overlay running
+./rust/target/release/claude-airou run             # the overlay itself
+./rust/target/release/claude-airou snapshot --out ~/Desktop/airou.png   # ask the running overlay for a PNG
+./rust/target/release/claude-airou click primary   # scripted click (expand / collapse / pet)
 ```
 
-The CLI surface is identical to the Swift binary (`claude-airou help`). To point Claude Code
-hooks / the status line / the Claude desktop app at the Rust binary instead of the Swift one,
-run its own installers (they edit the same config files, with backups):
-
-```bash
-./target/release/claude-airou install-hooks
-./target/release/claude-airou install-statusline
-./target/release/claude-airou install-mcp
-```
+`claude-airou help` lists the CLI. The installers (`make hooks` / `make statusline` /
+`make mcp`, or the `install-*` subcommands directly) edit the config files with backups.
 
 ## Overlay: what is done, what remains
 
@@ -91,8 +85,8 @@ three sessions, one waiting for approval — screenshots matched to the point):
   format (`click x=… cards: … -> expand|collapse|pin …|pet`).
 - Light/dark appearance, the accent colour and `windowBackgroundColor` are read from
   AppKit (re-checked periodically).
-- `make autostart` / `make no-autostart` in `rust/Makefile` write the same LaunchAgent as
-  the Swift Makefile (`dev.claude-airou.overlay`), pointing at `~/.local/bin/claude-airou`.
+- `make autostart` / `make no-autostart` (repo-root Makefile) write the LaunchAgent
+  `dev.claude-airou.overlay`, pointing at `~/.local/bin/claude-airou`.
 
 Still missing / different:
 
@@ -111,9 +105,9 @@ Still missing / different:
 Deliberate, all edge-case-only (an adversarial review pass hunted for more; anything not
 listed here is meant to match 1:1 — file a bug if it doesn't):
 
-- **Files are format-compatible, not byte-identical.** Each binary decodes the other's
-  files; key order and float formatting differ (Swift sorts keys and prints `1755500000`,
-  serde_json keeps declaration order and prints `1755500000.0`).
+- **Files are format-compatible, not byte-identical.** Files written by the old Swift
+  binary decode fine (and vice versa); key order and float formatting differ (Swift sorted
+  keys and printed `1755500000`, serde_json keeps declaration order and prints `1755500000.0`).
 - **"1 character" = 1 Unicode scalar, not 1 grapheme.** Bubble truncation, pet
   validation and the row layout's label-width estimate count scalars (`char`), Swift
   counts grapheme clusters — ZWJ emoji and NFD-decomposed text diverge (never a crash).
@@ -140,10 +134,9 @@ listed here is meant to match 1:1 — file a bug if it doesn't):
    `snapshot`/`click` commands, Swift-convention window position, full menu, autostart
    Makefile targets. Exit criterion: a week of daily use without missing the Swift
    overlay (open: emoji in bubbles).
-3. **v1.0 — replace Swift.** Move `Sources/ClaudeAirou/Resources/pets/` to a neutral
-   `pets/` directory (update the `include_str!` paths and the Swift package resource list —
-   or delete the Swift package in the same change), point the Makefile at cargo, delete
-   `Sources/`. State files, configs and installers need no migration — they were shared
+3. **v1.0 — replace Swift** (done). The pet art moved to a neutral repo-root `pets/`
+   directory, the root Makefile drives cargo, and `Sources/` + `Package.swift` were
+   deleted. State files, configs and installers needed no migration — they were shared
    all along.
 4. **v1.1 — Windows overlay** (tray + layered window), then Linux (X11 first; Wayland
    always-on-top/click-through is compositor-dependent).
@@ -151,6 +144,10 @@ listed here is meant to match 1:1 — file a bug if it doesn't):
 ## Layout
 
 ```
+../Makefile              build / test / install / hooks / statusline / mcp / skill / autostart / render-all
+../pets/*.json           the 8 built-in pets (embedded with include_str!)
+../skills/hatch-pet/     the /hatch-pet skill for Claude Code
+Cargo.toml, integration_test.py
 src/
   main.rs, cli.rs        entry + arg parsing/dispatch (mirrors Swift CommandLineInterface)
   model.rs               PetState, SessionSnapshot, usage, AppConfig  ← on-disk contract
@@ -174,10 +171,11 @@ src/
     tray.rs                menu model + muda menu (tray and right-click), lock.rs (pid lock)
 ```
 
-Tests: `cargo test` (300 unit tests, run everywhere; the overlay's pure modules — row
-layout, focus/click logic, animation curves, placement, click/snapshot request parsing —
-are covered without a window; a few font tests need macOS), plus `python3 integration_test.py` — a 40-check battery that drives the real
-binary end to end (hook lifecycle incl. the approval merge policy, MCP conversation with a
-real hatched PNG, installers against fixture files, Swift-file interop, robustness) inside
-a throwaway sandbox. Cross-check without a Mac:
+Tests: `make test` from the repo root = `cargo test` (300 unit tests, run everywhere; the
+overlay's pure modules — row layout, focus/click logic, animation curves, placement,
+click/snapshot request parsing — are covered without a window; a few font tests need macOS)
+plus `python3 integration_test.py` — a 40-check battery that drives the real binary end to
+end (hook lifecycle incl. the approval merge policy, MCP conversation with a real hatched
+PNG, installers against fixture files, Swift-format file interop, robustness) inside a
+throwaway sandbox. Cross-check without a Mac:
 `rustup target add aarch64-apple-darwin && cargo check --target aarch64-apple-darwin`.

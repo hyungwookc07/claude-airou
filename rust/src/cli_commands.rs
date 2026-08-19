@@ -11,12 +11,12 @@ use crate::state_store::StateStore;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// The exact 10-step `simulate demo` script from Swift (state, message, sleep seconds).
+/// The 10-step `simulate demo` script (state, message, sleep seconds).
 const DEMO_SCRIPT: [(PetState, &str, f64); 10] = [
     (PetState::Hello, "Hi! Ready when you are", 3.0),
     (PetState::Thinking, "Thinking…", 3.0),
-    (PetState::Working, "Reading main.swift", 3.0),
-    (PetState::Working, "Running: swift build", 3.0),
+    (PetState::Working, "Reading main.rs", 3.0),
+    (PetState::Working, "Running: cargo build", 3.0),
     (PetState::WaitingApproval, "Approve? Running: git push", 5.0),
     (PetState::Working, "Editing README.md", 3.0),
     (PetState::Error, "Bash failed — recovering…", 3.0),
@@ -573,12 +573,12 @@ mod tests {
     }
 
     #[test]
-    fn demo_script_matches_swift() {
+    fn demo_script_is_the_expected_sequence() {
         let expected: [(PetState, &str, f64); 10] = [
             (PetState::Hello, "Hi! Ready when you are", 3.0),
             (PetState::Thinking, "Thinking…", 3.0),
-            (PetState::Working, "Reading main.swift", 3.0),
-            (PetState::Working, "Running: swift build", 3.0),
+            (PetState::Working, "Reading main.rs", 3.0),
+            (PetState::Working, "Running: cargo build", 3.0),
             (PetState::WaitingApproval, "Approve? Running: git push", 5.0),
             (PetState::Working, "Editing README.md", 3.0),
             (PetState::Error, "Bash failed — recovering…", 3.0),

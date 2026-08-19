@@ -36,7 +36,7 @@ and design rules below still apply — skip the file/CLI steps of the workflow.
 7. **Hand over**: tell the user the pet is available in the menu bar 🐾 → Pet → `<name>`
    (or "Reload pets" if the overlay is already running), and show the sheet path.
    If `claude-airou` is not on PATH, use `~/.local/bin/claude-airou` or the repo's
-   `.build/release/claude-airou`.
+   `rust/target/release/claude-airou` (`make build`).
 
 If asked to *edit* an existing pet, load the JSON, change only what was asked, and repeat
 steps 5–7.

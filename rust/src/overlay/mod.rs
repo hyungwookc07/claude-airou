@@ -1,5 +1,5 @@
 //! The floating pet overlay — macOS implementation (winit + CALayer presenter + tray-icon).
-//! Functional reference: `Sources/ClaudeAirou/UI/` (AppDelegate, OverlayPanel, PetView,
+//! Functional reference: the Swift original's `Sources/ClaudeAirou/UI/` (AppDelegate, OverlayPanel, PetView,
 //! PetViewModel, RowLayout). What it does:
 //!
 //! 1. Window: undecorated, transparent, always-on-top, never activates/steals focus
