@@ -26,6 +26,8 @@ REPOSITORY="hyungwookc07/claude-airou"
 BINARY_NAME="claude-airou"
 ASSET_NAME="claude-airou-macos-universal.tar.gz"
 INSTALL_DIR="${CLAUDE_AIROU_INSTALL_DIR:-$HOME/.local/bin}"
+LAUNCH_AGENT_LABEL="dev.claude-airou.overlay"
+LAUNCH_AGENT_PLIST="$HOME/Library/LaunchAgents/$LAUNCH_AGENT_LABEL.plist"
 MINIMUM_MACOS_MAJOR_VERSION=14
 
 setup_arguments=""
@@ -126,8 +128,19 @@ if [ "$should_run_setup" -eq 1 ]; then
     *" --with-autostart "*) ;;
     *)
       if ! pgrep -f "$BINARY_NAME run" >/dev/null 2>&1; then
-        # nohup so closing the terminal that ran the installer does not take the pet with it.
-        nohup "$INSTALL_DIR/$BINARY_NAME" run >/dev/null 2>&1 &
+        started_by=""
+        # Someone who already turned "Start at login" on has a launchd job for the overlay.
+        # Starting our own copy would leave it running outside launchd until the next login,
+        # so hand the restart to launchd and only fall back to running it ourselves.
+        if [ -f "$LAUNCH_AGENT_PLIST" ]; then
+          if launchctl kickstart "gui/$(id -u)/$LAUNCH_AGENT_LABEL" >/dev/null 2>&1; then
+            started_by="launchd"
+          fi
+        fi
+        if [ -z "$started_by" ]; then
+          # nohup so closing the terminal that ran the installer does not take the pet with it.
+          nohup "$INSTALL_DIR/$BINARY_NAME" run >/dev/null 2>&1 &
+        fi
         sleep 1
         say ""
         say "The pet is on screen now. Everything else lives in the menu bar 🐾 menu."

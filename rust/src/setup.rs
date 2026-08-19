@@ -81,8 +81,9 @@ pub fn run_setup(parsed: &Parsed) -> i32 {
 
     println!("Done. Next:");
     println!("  • Start a NEW Claude Code session — sessions that are already open do not re-read the hook settings.");
-    if should_install_autostart {
+    if should_install_autostart || is_login_autostart_installed() {
         println!("  • The overlay is running now and will start again at login (menu bar 🐾).");
+        println!("  • The rest is in the menu bar 🐾 menu: the MCP server and the gauge's status line feed.");
     } else {
         println!("  • Everything else is in the menu bar 🐾 menu: \"Start at login\" (off for now, so the");
         println!("    pet will not come back by itself after a reboot), the MCP server, and the gauge's");
