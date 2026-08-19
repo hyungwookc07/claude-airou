@@ -93,6 +93,10 @@ if pgrep -f "$BINARY_NAME run" >/dev/null 2>&1; then
   say "Stopping the running overlay…"
   pkill -f "$BINARY_NAME run" >/dev/null 2>&1 || true
   sleep 1
+  # The single-instance lock is a pid file that only the overlay itself cleans up on a
+  # graceful quit; after a kill it lingers for a day and the next start would just print
+  # "already running" and exit — leaving the user with no pet after an update.
+  rm -f "${CLAUDE_AIROU_HOME:-$HOME/.claude-airou}/overlay.lock"
 fi
 
 mkdir -p "$INSTALL_DIR"
