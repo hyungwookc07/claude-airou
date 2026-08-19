@@ -9,6 +9,7 @@
 //! a login item nobody agreed to is not a good surprise.
 
 use crate::cli::Parsed;
+#[cfg(target_os = "macos")] // only the LaunchAgent side takes paths directly
 use std::path::Path;
 
 /// Baked into the binary so `setup` can install the skill without the repo (the Makefile
@@ -153,9 +154,16 @@ fn remove_hatch_pet_skill() -> Result<String, String> {
 // MARK: - Tray menu entry points
 
 /// True when the login item is registered (the tray shows a check mark for it).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 pub fn is_login_autostart_installed() -> bool {
     crate::paths::overlay_launch_agent_file().exists()
+}
+
+/// No login item exists off macOS yet, so the tray check mark is always off there.
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+pub fn is_login_autostart_installed() -> bool {
+    false
 }
 
 /// Turns the login item on; Ok carries the summary the tray shows in an alert.
@@ -263,10 +271,12 @@ fn run_launchctl(arguments: &[&str], plist_path: Option<&Path>) -> Result<(), St
 
 /// Minimal XML escaping — the executable path is the only interpolated value, but a home
 /// directory with `&` in it would otherwise produce a plist launchd refuses to parse.
+#[cfg(target_os = "macos")]
 fn xml_escaped(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
+#[cfg(target_os = "macos")]
 fn launch_agent_plist(executable: &Path, label: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -295,6 +305,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn plist_escapes_the_executable_path() {
         let plist = launch_agent_plist(
