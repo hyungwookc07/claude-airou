@@ -166,6 +166,16 @@ impl SessionSnapshot {
         }
         self.state
     }
+
+    /// True for a session that has only been opened (`SessionStart` from Claude Code, or the
+    /// MCP server's `initialize`) and has done nothing since — once its hello wave has
+    /// decayed there is nothing to show, so the overlay hides it until the first real
+    /// event (prompt, tool call, …) rewrites the file. Merely clicking through past
+    /// sessions in the desktop app resumes each one and would otherwise leave a pet behind.
+    pub fn is_opened_without_activity(&self) -> bool {
+        matches!(self.last_event_name.as_str(), "SessionStart" | "mcp:initialize")
+            && self.effective_state() == PetState::Idle
+    }
 }
 
 /// Usage figures for one session (`<session>.usage.json`). Mirrors `SessionUsageSnapshot`.
@@ -524,6 +534,35 @@ mod tests {
             pending_tool_use_id: None,
         };
         assert_eq!(snapshot.effective_state(), PetState::Idle);
+    }
+
+    #[test]
+    fn opened_without_activity_only_after_the_hello_wave_decays() {
+        let mut snapshot = SessionSnapshot {
+            session_id: "s".into(),
+            cwd: "/w/p".into(),
+            state: PetState::Hello,
+            message: "Welcome back!".into(),
+            last_event_name: "SessionStart".into(),
+            tool_name: None,
+            updated_at_epoch_seconds: now_epoch_secs(),
+            pending_tool_use_id: None,
+        };
+        // Fresh resume: the wave is still showing.
+        assert!(!snapshot.is_opened_without_activity());
+        // Wave decayed, nothing else happened: hidden.
+        snapshot.updated_at_epoch_seconds = now_epoch_secs() - 60.0;
+        assert!(snapshot.is_opened_without_activity());
+        // The MCP server's initialize counts the same way.
+        snapshot.last_event_name = "mcp:initialize".into();
+        assert!(snapshot.is_opened_without_activity());
+        // Any real event (even one that decayed to idle) keeps the session visible.
+        snapshot.last_event_name = "UserPromptSubmit".into();
+        assert!(!snapshot.is_opened_without_activity());
+        snapshot.last_event_name = "SessionStart".into();
+        snapshot.state = PetState::Working;
+        snapshot.updated_at_epoch_seconds = now_epoch_secs();
+        assert!(!snapshot.is_opened_without_activity());
     }
 
     #[test]

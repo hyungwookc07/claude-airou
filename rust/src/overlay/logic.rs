@@ -140,6 +140,13 @@ impl OverlayModel {
     /// painter shows changed.
     pub fn reload(&mut self, sessions: Vec<SessionSnapshot>, usage: Vec<SessionUsageSnapshot>, now_secs: f64) -> bool {
         let mut changed = false;
+        // Sessions that were only opened (resumed by clicking through the desktop app's
+        // list, or an MCP server that never spoke) show their hello wave and then step out
+        // of the row until they do something.
+        let sessions: Vec<SessionSnapshot> = sessions
+            .into_iter()
+            .filter(|session| !session.is_opened_without_activity())
+            .collect();
         let usage_by_session: HashMap<String, SessionUsageSnapshot> = usage
             .into_iter()
             .map(|snapshot| (snapshot.session_id.clone(), snapshot))
@@ -610,6 +617,20 @@ mod tests {
 
     fn model() -> OverlayModel {
         OverlayModel::new(INPUTS)
+    }
+
+    #[test]
+    fn reload_hides_sessions_that_were_only_opened() {
+        let mut model = model();
+        let mut resumed_long_ago = snapshot("resumed", "/w/resumed", PetState::Hello, 60.0);
+        resumed_long_ago.last_event_name = "SessionStart".into();
+        let mut resumed_just_now = snapshot("fresh", "/w/fresh", PetState::Hello, 0.0);
+        resumed_just_now.last_event_name = "SessionStart".into();
+        let working = snapshot("busy", "/w/busy", PetState::Working, 5.0);
+        model.reload(vec![resumed_just_now, working, resumed_long_ago], vec![], 0.0);
+        let ids: Vec<&str> = model.sessions.iter().map(|session| session.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["fresh", "busy"], "the decayed hello-only session is filtered out");
+        assert_eq!(model.collapsed_label(), "busy +1");
     }
 
     #[test]

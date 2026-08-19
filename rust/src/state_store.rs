@@ -7,7 +7,11 @@ use crate::model::{SessionSnapshot, SessionUsageSnapshot};
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub const STALE_AFTER_SECS: f64 = 24.0 * 60.0 * 60.0;
+/// Session/usage files whose mtime is older than this are deleted on read. Normal sessions
+/// remove their file on `SessionEnd`; this only catches sessions that died without one
+/// (killed terminal, crash). Two hours keeps a lunch break alive and drops yesterday's
+/// ghosts; a live session that stayed silent that long reappears on its next event.
+pub const STALE_AFTER_SECS: f64 = 2.0 * 60.0 * 60.0;
 pub const USAGE_FILE_SUFFIX: &str = ".usage.json";
 
 pub struct StateStore {

@@ -67,6 +67,7 @@ Parallel tool calls and subagents fire hooks with the same `session_id`, so the 
 
 - **The clock lingers briefly after you approve.** Claude Code has no "user approved" hook. Approval starts the tool; the state clears when the tool finishes (`PostToolUse`), so approving a long-running command keeps the red clock up until it completes.
 - **Deny / Esc have no event.** `Stop` does not fire on interrupts and a denial does not fire `PostToolUseFailure`. The next event (`PostToolBatch`, a new prompt, `idle_prompt` after 60 s) cleans up; failing that, states decay to idle by themselves (20 min for waiting/needs-input, 15 min for busy).
+- **Which sessions get a pet.** Every session Claude Code fires hooks for, until its `SessionEnd`. Just *opening* a past session (clicking through the list in the desktop app resumes it) fires `SessionStart` — the pet waves hello and then steps out of the row until that session actually does something (a prompt, a tool call). Sessions that die without a `SessionEnd` (killed terminal, crash) are dropped 2 hours after their last event; a live session that stayed silent that long reappears on its next event.
 - To relocate the state directory set `CLAUDE_AIROU_HOME=/path` — the overlay and the hook must both see the same value.
 
 ## Usage
