@@ -8,7 +8,7 @@ LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-airou.overlay.plist
 LEGACY_LAUNCH_AGENT := $(HOME)/Library/LaunchAgents/dev.claude-pet.overlay.plist
 LEGACY_BINARY := $(BIN_DIR)/claude-pet
 
-.PHONY: build test install hooks statusline mcp skill uninstall run demo render-all autostart no-autostart clean
+.PHONY: build test install setup hooks statusline mcp skill uninstall run demo render-all autostart no-autostart clean
 
 ## Build a release binary (rust/target/release/claude-airou)
 build:
@@ -28,6 +28,10 @@ install: build
 		echo "removed legacy launch agent dev.claude-pet.overlay"; fi
 	@if [ -f $(LEGACY_BINARY) ]; then rm -f $(LEGACY_BINARY); echo "removed legacy $(LEGACY_BINARY)"; fi
 	@echo "installed $(BIN_DIR)/claude-airou"
+
+## One-shot wiring — hooks + /hatch-pet skill + start at login (what the installer runs)
+setup: install
+	$(BIN_DIR)/claude-airou setup
 
 ## Register the hook in ~/.claude/settings.json (backup is written first)
 hooks: install
@@ -49,10 +53,7 @@ skill:
 
 ## Remove hooks, MCP entry, binary, skill and launch agent (keeps ~/.claude-airou)
 uninstall:
-	-$(BIN_DIR)/claude-airou uninstall-hooks
-	-$(BIN_DIR)/claude-airou uninstall-statusline
-	-$(BIN_DIR)/claude-airou uninstall-mcp
-	-launchctl bootout gui/$$(id -u) $(LAUNCH_AGENT) 2>/dev/null
+	-$(BIN_DIR)/claude-airou uninstall
 	-launchctl bootout gui/$$(id -u) $(LEGACY_LAUNCH_AGENT) 2>/dev/null
 	rm -f $(LAUNCH_AGENT) $(LEGACY_LAUNCH_AGENT) $(BIN_DIR)/claude-airou $(LEGACY_BINARY)
 	rm -rf $(SKILL_DIR)

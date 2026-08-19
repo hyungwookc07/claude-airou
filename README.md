@@ -22,21 +22,44 @@ Built-in pets — **Airou** (the namesake and default: a Felyne-style hunting ca
 
 ## Install
 
-Requirements: macOS 14+, a Rust toolchain ([rustup](https://rustup.rs), stable ≥ 1.85).
+Requirements: macOS 14+. Nothing else — the installer downloads a prebuilt universal binary, so you do not need Rust or Xcode.
 
 ```bash
-git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
-make install      # → ~/.local/bin/claude-airou
-make hooks        # registers the hook in ~/.claude/settings.json (a backup is written first)
-make statusline   # optional: feeds the battery gauge from the Claude Code status line (see below)
-make mcp          # optional: lets Claude chat (the desktop app) drive the pet too (see below)
-make skill        # optional: installs the /hatch-pet skill into ~/.claude/skills
-claude-airou        # start the overlay (menu bar 🐾 icon + the pet)
+curl -fsSL https://raw.githubusercontent.com/hyungwookc07/claude-airou/main/install.sh | sh
 ```
+
+That installs `~/.local/bin/claude-airou`, registers the Claude Code hook in `~/.claude/settings.json` (a backup is written first), installs the `/hatch-pet` skill, starts the overlay and keeps it starting at login. Re-run the same line any time to **update**.
 
 Claude Code sessions that were already open do not re-read the hook settings; **start a new session** and the pet will react.
 
-Start at login: `make autostart` (LaunchAgent `dev.claude-airou.overlay`; undo with `make no-autostart`).
+Two things stay opt-in, because they rewrite settings that are probably already yours:
+
+```bash
+claude-airou install-statusline   # feed the battery gauge from your Claude Code status line (see below)
+claude-airou install-mcp          # let Claude chat (the desktop app) drive the pet too (see below)
+```
+
+Installer options — `curl … | sh -s -- --minimal` (hooks + skill only, no login item), `--no-autostart`, `--with-statusline`, `--with-mcp`, `--no-setup` (binary only). `CLAUDE_AIROU_INSTALL_DIR` picks a different directory, `CLAUDE_AIROU_VERSION=vX.Y.Z` a specific release.
+
+Uninstall with `claude-airou uninstall` (removes the hook, status line, MCP entry, skill and login item; your pets and config in `~/.claude-airou` stay), then delete the binary.
+
+<details>
+<summary>Build from source instead</summary>
+
+Needs a Rust toolchain ([rustup](https://rustup.rs), stable ≥ 1.85).
+
+```bash
+git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
+make setup        # build → ~/.local/bin/claude-airou, then hooks + skill + start at login
+make statusline   # optional
+make mcp          # optional
+claude-airou        # start the overlay (menu bar 🐾 icon + the pet)
+```
+
+Individual targets (`make install`, `make hooks`, `make skill`, `make autostart`, `make no-autostart`, `make uninstall`) still exist; each one is documented in the Makefile.
+</details>
+
+The overlay starts at login via the LaunchAgent `dev.claude-airou.overlay`; undo that alone with `make no-autostart`.
 Only one overlay runs at a time — a second `claude-airou run` prints "already running" and exits (`~/.claude-airou/overlay.lock`).
 
 ## How it works
@@ -180,9 +203,12 @@ The built-in pets live in [`pets/`](pets/) and are embedded into the binary at b
 ## Uninstall
 
 ```bash
-make uninstall          # removes the hooks and the MCP entry (with backups), the binary, the skill and the LaunchAgent
-rm -rf ~/.claude-airou    # also removes settings, custom pets and state
+claude-airou uninstall            # removes the hooks, status line, MCP entry (with backups), the skill and the LaunchAgent
+rm -f ~/.local/bin/claude-airou   # the binary itself
+rm -rf ~/.claude-airou            # also removes settings, custom pets and state
 ```
+
+From a source checkout, `make uninstall` does the same and deletes the binary for you.
 
 ## The Rust crate
 

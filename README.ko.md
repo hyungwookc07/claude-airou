@@ -20,21 +20,44 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 
 ## 설치
 
-요구사항: macOS 14+, Rust 툴체인 ([rustup](https://rustup.rs), stable ≥ 1.85).
+요구사항: macOS 14+. 그것뿐이다 — 미리 빌드된 유니버설 바이너리를 받아 쓰므로 Rust나 Xcode가 필요 없다.
 
 ```bash
-git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
-make install      # → ~/.local/bin/claude-airou
-make hooks        # ~/.claude/settings.json 에 hook 등록 (백업 파일을 먼저 만든다)
-make statusline   # (선택) 배터리 게이지에 Claude Code 상태줄 데이터를 공급 (아래 참고)
-make mcp          # (선택) 클로드 챗(데스크톱 앱)에서도 펫이 반응하게 (아래 참고)
-make skill        # (선택) /hatch-pet 스킬을 ~/.claude/skills 에 설치
-claude-airou        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
+curl -fsSL https://raw.githubusercontent.com/hyungwookc07/claude-airou/main/install.sh | sh
 ```
+
+이 한 줄이 `~/.local/bin/claude-airou` 설치, `~/.claude/settings.json`에 hook 등록(백업을 먼저 만든다), `/hatch-pet` 스킬 설치, 오버레이 실행, 로그인 시 자동 시작까지 다 해준다. **업데이트**도 같은 줄을 다시 실행하면 된다.
 
 이미 열려 있던 Claude Code 세션은 hook 설정을 다시 읽지 않으므로 **새 세션을 시작**해야 펫이 반응한다.
 
-로그인 시 자동 실행: `make autostart` (LaunchAgent `dev.claude-airou.overlay`; 해제는 `make no-autostart`).
+둘은 선택으로 남겨둔다 — 이미 당신이 쓰고 있을 설정을 고쳐 쓰기 때문이다:
+
+```bash
+claude-airou install-statusline   # Claude Code 상태줄로 배터리 게이지 공급 (아래 참고)
+claude-airou install-mcp          # 클로드 챗(데스크톱 앱)에서도 펫 조종 (아래 참고)
+```
+
+설치 스크립트 옵션 — `curl … | sh -s -- --minimal` (hook + 스킬만, 자동 시작 없음), `--no-autostart`, `--with-statusline`, `--with-mcp`, `--no-setup` (바이너리만). `CLAUDE_AIROU_INSTALL_DIR`로 설치 위치를, `CLAUDE_AIROU_VERSION=vX.Y.Z`로 특정 버전을 고를 수 있다.
+
+제거는 `claude-airou uninstall` (hook, 상태줄, MCP 등록, 스킬, 로그인 항목을 지우고 `~/.claude-airou`의 펫·설정은 남긴다) 후 바이너리 삭제.
+
+<details>
+<summary>소스에서 빌드해서 쓰기</summary>
+
+Rust 툴체인이 필요하다 ([rustup](https://rustup.rs), stable ≥ 1.85).
+
+```bash
+git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
+make setup        # 빌드 → ~/.local/bin/claude-airou, 이어서 hook + 스킬 + 로그인 시 자동 시작
+make statusline   # (선택)
+make mcp          # (선택)
+claude-airou        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
+```
+
+개별 타겟(`make install`, `make hooks`, `make skill`, `make autostart`, `make no-autostart`, `make uninstall`)도 그대로 있다.
+</details>
+
+오버레이는 LaunchAgent `dev.claude-airou.overlay`로 로그인 시 뜨고, 이것만 끄려면 `make no-autostart`.
 오버레이는 한 번에 하나만 뜬다 — 두 번째 `claude-airou run`은 "already running"만 찍고 종료한다 (`~/.claude-airou/overlay.lock`).
 
 ## 동작 원리
@@ -179,9 +202,12 @@ Claude Code에서:
 ## 제거
 
 ```bash
-make uninstall          # hooks·MCP 항목 제거(백업 생성), 바이너리/스킬/LaunchAgent 삭제
-rm -rf ~/.claude-airou    # 설정·펫·상태까지 지우려면
+claude-airou uninstall            # hooks·상태줄·MCP 항목 제거(백업 생성), 스킬/LaunchAgent 삭제
+rm -f ~/.local/bin/claude-airou   # 바이너리
+rm -rf ~/.claude-airou            # 설정·펫·상태까지 지우려면
 ```
+
+소스 체크아웃에서는 `make uninstall`이 같은 일을 하고 바이너리까지 지운다.
 
 ## 러스트 크레이트
 

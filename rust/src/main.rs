@@ -14,6 +14,7 @@ mod model;
 mod paths;
 mod pets;
 mod render;
+mod setup;
 mod state_store;
 mod statusline;
 
