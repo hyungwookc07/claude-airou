@@ -72,6 +72,8 @@ pub fn claude_hatch_pet_skill_dir() -> PathBuf {
 }
 
 /// The LaunchAgent that starts the overlay at login (written by `claude-airou setup`).
+/// Login items are per-platform; Windows and Linux will need their own mechanism.
+#[cfg(target_os = "macos")]
 pub fn overlay_launch_agent_file() -> PathBuf {
     home_dir()
         .join("Library/LaunchAgents")
@@ -79,13 +81,16 @@ pub fn overlay_launch_agent_file() -> PathBuf {
 }
 
 /// Pre-rename LaunchAgent (`claude-pet`), removed by setup/uninstall when found.
+#[cfg(target_os = "macos")]
 pub fn legacy_overlay_launch_agent_file() -> PathBuf {
     home_dir()
         .join("Library/LaunchAgents")
         .join(format!("{LEGACY_OVERLAY_LAUNCH_AGENT_LABEL}.plist"))
 }
 
+#[cfg(target_os = "macos")]
 pub const OVERLAY_LAUNCH_AGENT_LABEL: &str = "dev.claude-airou.overlay";
+#[cfg(target_os = "macos")]
 pub const LEGACY_OVERLAY_LAUNCH_AGENT_LABEL: &str = "dev.claude-pet.overlay";
 
 /// Where the Claude desktop app (chat) reads its MCP servers from.

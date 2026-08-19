@@ -56,6 +56,7 @@ impl PetState {
 
     /// How long the speech bubble of a sticky done / error result stays up before only the
     /// badge remains (see `transient_duration_secs`).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay bubble timing
     pub const RESULT_BUBBLE_LINGER_SECS: f64 = 30.0;
 
     /// Seconds after which the state decays back to `idle` if no newer event arrives.
@@ -179,6 +180,7 @@ impl SessionSnapshot {
     /// decayed there is nothing to show, so the overlay hides it until the first real
     /// event (prompt, tool call, …) rewrites the file. Merely clicking through past
     /// sessions in the desktop app resumes each one and would otherwise leave a pet behind.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay row filtering
     pub fn is_opened_without_activity(&self) -> bool {
         matches!(self.last_event_name.as_str(), "SessionStart" | "mcp:initialize")
             && self.effective_state() == PetState::Idle
