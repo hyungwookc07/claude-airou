@@ -26,18 +26,27 @@ Claude가 **생각 중 / 작업 중 / 승인 대기 / 입력 대기 / 완료 / �
 curl -fsSL https://raw.githubusercontent.com/hyungwookc07/claude-airou/main/install.sh | sh
 ```
 
-이 한 줄이 `~/.local/bin/claude-airou` 설치, `~/.claude/settings.json`에 hook 등록(백업을 먼저 만든다), `/hatch-pet` 스킬 설치, 오버레이 실행, 로그인 시 자동 시작까지 다 해준다. **업데이트**도 같은 줄을 다시 실행하면 된다.
+이 한 줄이 `~/.local/bin/claude-airou` 설치, `~/.claude/settings.json`에 hook 등록(백업을 먼저 만든다), `/hatch-pet` 스킬 설치, 그리고 펫을 화면에 띄우는 것까지 해준다. **업데이트**도 같은 줄을 다시 실행하면 된다.
+
+**바꾸는 건 여기까지다.** 로그인 시 자동 시작, 상태줄, MCP 서버는 메뉴바 🐾 메뉴의 스위치라, 동의하지 않은 게 몰래 등록되지 않는다:
+
+| 메뉴바 🐾 | |
+|---|---|
+| **Start at login** | 기본 꺼짐 — 켜면 재부팅 후에도 펫이 돌아온다 |
+| **Install MCP server for Claude chat…** | 클로드 데스크톱 앱에서 펫 조종 |
+| **Gauge → 상태줄 설치** | Claude Code 상태줄로 배터리 게이지 공급 |
 
 이미 열려 있던 Claude Code 세션은 hook 설정을 다시 읽지 않으므로 **새 세션을 시작**해야 펫이 반응한다.
 
-둘은 선택으로 남겨둔다 — 이미 당신이 쓰고 있을 설정을 고쳐 쓰기 때문이다:
+터미널에서 켜고 싶다면 같은 것을 이렇게도 할 수 있다:
 
 ```bash
-claude-airou install-statusline   # Claude Code 상태줄로 배터리 게이지 공급 (아래 참고)
-claude-airou install-mcp          # 클로드 챗(데스크톱 앱)에서도 펫 조종 (아래 참고)
+claude-airou setup --with-autostart   # 로그인 시 오버레이 시작
+claude-airou install-statusline       # 상태줄로 배터리 게이지 공급 (아래 참고)
+claude-airou install-mcp              # 클로드 챗(데스크톱 앱)에서 펫 조종 (아래 참고)
 ```
 
-설치 스크립트 옵션 — `curl … | sh -s -- --minimal` (hook + 스킬만, 자동 시작 없음), `--no-autostart`, `--with-statusline`, `--with-mcp`, `--no-setup` (바이너리만). `CLAUDE_AIROU_INSTALL_DIR`로 설치 위치를, `CLAUDE_AIROU_VERSION=vX.Y.Z`로 특정 버전을 고를 수 있다.
+설치 스크립트 옵션 — `curl … | sh -s -- --with-autostart`, `--with-statusline`, `--with-mcp`, `--no-setup` (바이너리만, 설정을 건드리지 않음). `CLAUDE_AIROU_INSTALL_DIR`로 설치 위치를, `CLAUDE_AIROU_VERSION=vX.Y.Z`로 특정 버전을 고를 수 있다.
 
 제거는 `claude-airou uninstall` (hook, 상태줄, MCP 등록, 스킬, 로그인 항목을 지우고 `~/.claude-airou`의 펫·설정은 남긴다) 후 바이너리 삭제.
 
@@ -48,7 +57,7 @@ Rust 툴체인이 필요하다 ([rustup](https://rustup.rs), stable ≥ 1.85).
 
 ```bash
 git clone https://github.com/hyungwookc07/claude-airou.git && cd claude-airou
-make setup        # 빌드 → ~/.local/bin/claude-airou, 이어서 hook + 스킬 + 로그인 시 자동 시작
+make setup        # 빌드 → ~/.local/bin/claude-airou, 이어서 hook + 스킬
 make statusline   # (선택)
 make mcp          # (선택)
 claude-airou        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
@@ -57,7 +66,7 @@ claude-airou        # 오버레이 실행 (메뉴바 🐾 아이콘 + 펫)
 개별 타겟(`make install`, `make hooks`, `make skill`, `make autostart`, `make no-autostart`, `make uninstall`)도 그대로 있다.
 </details>
 
-오버레이는 LaunchAgent `dev.claude-airou.overlay`로 로그인 시 뜨고, 이것만 끄려면 `make no-autostart`.
+"Start at login"은 LaunchAgent `dev.claude-airou.overlay`를 등록한다 (`make autostart`와 같고, 해제는 `make no-autostart`).
 오버레이는 한 번에 하나만 뜬다 — 두 번째 `claude-airou run`은 "already running"만 찍고 종료한다 (`~/.claude-airou/overlay.lock`).
 
 ## 동작 원리

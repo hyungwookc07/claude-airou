@@ -494,6 +494,7 @@ impl App {
             bubbles_hidden: self.config.is_speech_bubble_hidden,
             click_through: self.config.is_click_through,
             pet_hidden: self.config.is_pet_hidden,
+            start_at_login: crate::setup::is_login_autostart_installed(),
         }
     }
 
@@ -594,6 +595,30 @@ impl App {
                 Ok(summary) => show_alert("Claude Code hooks installed", &summary, false),
                 Err(error) => show_alert("Could not install hooks", &error, true),
             },
+            InstallMcp => match crate::install::install_mcp_at_default_paths() {
+                Ok(summary) => show_alert(
+                    "MCP server registered",
+                    &format!("{summary}\n\nQuit the Claude desktop app completely (Cmd-Q) and reopen it for the server to load."),
+                    false,
+                ),
+                Err(error) => show_alert("Could not register the MCP server", &error, true),
+            },
+            ToggleStartAtLogin => {
+                let is_enabled = crate::setup::is_login_autostart_installed();
+                let outcome = if is_enabled {
+                    crate::setup::remove_login_autostart_at_default_paths()
+                } else {
+                    crate::setup::install_login_autostart_at_default_paths()
+                };
+                if let Err(error) = outcome {
+                    let title = if is_enabled {
+                        "Could not turn off start at login"
+                    } else {
+                        "Could not turn on start at login"
+                    };
+                    show_alert(title, &error, true);
+                }
+            }
             OpenHookLog => {
                 let log_path = crate::paths::hook_log_file();
                 if !log_path.exists() {

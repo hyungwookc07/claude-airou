@@ -3,9 +3,10 @@
 //! skill, the login LaunchAgent) happens here instead, so an install script that only drops
 //! a binary in `~/.local/bin` can finish the job without a repo checkout.
 //!
-//! Defaults: hooks + skill + autostart. The status line and the MCP server rewrite config
-//! that is very likely already the user's own, so they stay opt-in (`--with-statusline`,
-//! `--with-mcp`) and setup only points at them.
+//! Defaults: hooks + the /hatch-pet skill, and nothing else. Everything that changes the
+//! machine beyond that — start-at-login, the status line, the MCP server — is a switch in
+//! the tray menu (or an explicit flag here), because a `curl … | sh` install cannot ask and
+//! a login item nobody agreed to is not a good surprise.
 
 use crate::cli::Parsed;
 use std::path::Path;
@@ -36,8 +37,8 @@ fn report_step(step_name: &str, outcome: Result<String, String>, failure_count: 
 }
 
 pub fn run_setup(parsed: &Parsed) -> i32 {
-    let is_minimal = parsed.has_flag("minimal");
-    let should_install_autostart = !is_minimal && !parsed.has_flag("no-autostart");
+    // --minimal and --no-autostart are the old spelling of the default; still accepted.
+    let should_install_autostart = parsed.has_flag("with-autostart") && !parsed.has_flag("no-autostart");
     let should_install_statusline = parsed.has_flag("with-statusline");
     let should_install_mcp = parsed.has_flag("with-mcp");
 
@@ -82,13 +83,9 @@ pub fn run_setup(parsed: &Parsed) -> i32 {
     if should_install_autostart {
         println!("  • The overlay is running now and will start again at login (menu bar 🐾).");
     } else {
-        println!("  • Run `claude-airou` to start the overlay (menu bar 🐾).");
-    }
-    if !should_install_statusline {
-        println!("  • Optional: `claude-airou install-statusline` feeds the battery gauge from your Claude Code status line.");
-    }
-    if !should_install_mcp {
-        println!("  • Optional: `claude-airou install-mcp` lets the Claude desktop app drive the pet.");
+        println!("  • Everything else is in the menu bar 🐾 menu: \"Start at login\" (off for now, so the");
+        println!("    pet will not come back by itself after a reboot), the MCP server, and the gauge's");
+        println!("    status line feed.");
     }
     println!("  • Undo everything with `claude-airou uninstall`.");
     0
@@ -151,6 +148,25 @@ fn remove_hatch_pet_skill() -> Result<String, String> {
     std::fs::remove_dir_all(&skill_dir)
         .map_err(|error| format!("could not remove {}: {error}", skill_dir.display()))?;
     Ok(format!("removed {}", skill_dir.display()))
+}
+
+// MARK: - Tray menu entry points
+
+/// True when the login item is registered (the tray shows a check mark for it).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn is_login_autostart_installed() -> bool {
+    crate::paths::overlay_launch_agent_file().exists()
+}
+
+/// Turns the login item on; Ok carries the summary the tray shows in an alert.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn install_login_autostart_at_default_paths() -> Result<String, String> {
+    install_login_autostart()
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn remove_login_autostart_at_default_paths() -> Result<String, String> {
+    remove_login_autostart()
 }
 
 // MARK: - Start at login (LaunchAgent)
