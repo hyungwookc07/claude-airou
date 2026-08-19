@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "claude-airou"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ab_glyph",
  "chrono",
