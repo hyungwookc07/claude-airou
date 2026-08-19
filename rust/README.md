@@ -106,5 +106,9 @@ src/
   overlay/               macOS overlay (winit, softbuffer, tray-icon) — cfg(target_os)
 ```
 
-Tests: `cargo test` (runs everywhere; overlay unit tests compile under the mac target).
-Cross-check without a Mac: `rustup target add aarch64-apple-darwin && cargo check --target aarch64-apple-darwin`.
+Tests: `cargo test` (222 unit tests, run everywhere; overlay unit tests compile under the
+mac target), plus `python3 integration_test.py` — a 40-check battery that drives the real
+binary end to end (hook lifecycle incl. the approval merge policy, MCP conversation with a
+real hatched PNG, installers against fixture files, Swift-file interop, robustness) inside
+a throwaway sandbox. Cross-check without a Mac:
+`rustup target add aarch64-apple-darwin && cargo check --target aarch64-apple-darwin`.
