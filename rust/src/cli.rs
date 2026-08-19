@@ -10,11 +10,10 @@ pub const USAGE_TEXT: &str = r#"claude-airou — a Codex-style desktop pet for C
 USAGE
   claude-airou                       Run the overlay (menu bar icon + floating pet; macOS)
   claude-airou run                   Same as above
-  claude-airou setup [--minimal] [--no-autostart] [--with-statusline] [--with-mcp]
-                                   Wire everything up in one go: Claude Code hooks, the
-                                   /hatch-pet skill and start-at-login (--minimal keeps
-                                   hooks + skill only). The status line and the MCP server
-                                   rewrite config you probably own, so they are opt-in.
+  claude-airou setup [--with-autostart] [--with-statusline] [--with-mcp]
+                                   Wire the pet into Claude Code: hooks + the /hatch-pet
+                                   skill. Start-at-login, the status line and the MCP server
+                                   are switches in the menu bar 🐾 menu, or the flags here.
   claude-airou uninstall             Undo setup (hooks, status line, MCP, skill, login item);
                                    keeps ~/.claude-airou and the binary itself
   claude-airou hook                  Claude Code hook entry point (reads hook JSON on stdin)
@@ -75,7 +74,7 @@ impl Parsed {
 }
 
 /// Options that never take a value; everything else written as `--name value` is an option.
-const BOOLEAN_FLAG_NAMES: [&str; 10] = [
+const BOOLEAN_FLAG_NAMES: [&str; 11] = [
     "solid",
     "print",
     "help",
@@ -83,6 +82,7 @@ const BOOLEAN_FLAG_NAMES: [&str; 10] = [
     "h",
     "yes",
     "minimal",
+    "with-autostart",
     "no-autostart",
     "with-statusline",
     "with-mcp",

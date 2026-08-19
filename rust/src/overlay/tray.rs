@@ -35,6 +35,8 @@ pub struct MenuModel {
     pub bubbles_hidden: bool,
     pub click_through: bool,
     pub pet_hidden: bool,
+    /// Whether the login item is registered (setup leaves it off by default).
+    pub start_at_login: bool,
 }
 
 impl MenuModel {
@@ -71,6 +73,8 @@ pub enum MenuAction {
     OpenPetsFolder,
     ResetPosition,
     InstallHooks,
+    InstallMcp,
+    ToggleStartAtLogin,
     OpenHookLog,
     Quit,
 }
@@ -124,6 +128,8 @@ pub fn menu_id_for(action: &MenuAction) -> String {
         MenuAction::OpenPetsFolder => "open-pets-folder".to_string(),
         MenuAction::ResetPosition => "reset-position".to_string(),
         MenuAction::InstallHooks => "install-hooks".to_string(),
+        MenuAction::InstallMcp => "install-mcp".to_string(),
+        MenuAction::ToggleStartAtLogin => "toggle-start-at-login".to_string(),
         MenuAction::OpenHookLog => "open-hook-log".to_string(),
         MenuAction::Quit => "quit".to_string(),
     }
@@ -153,6 +159,8 @@ pub fn action_for_menu_id(id: &str) -> Option<MenuAction> {
         "open-pets-folder" => Some(MenuAction::OpenPetsFolder),
         "reset-position" => Some(MenuAction::ResetPosition),
         "install-hooks" => Some(MenuAction::InstallHooks),
+        "install-mcp" => Some(MenuAction::InstallMcp),
+        "toggle-start-at-login" => Some(MenuAction::ToggleStartAtLogin),
         "open-hook-log" => Some(MenuAction::OpenHookLog),
         "quit" => Some(MenuAction::Quit),
         _ => None,
@@ -325,6 +333,19 @@ pub fn build_menu(model: &MenuModel) -> Menu {
         None,
     ));
     let _ = menu.append(&MenuItem::with_id(
+        menu_id_for(&MenuAction::InstallMcp),
+        "Install MCP server for Claude chat…",
+        true,
+        None,
+    ));
+    let _ = menu.append(&CheckMenuItem::with_id(
+        menu_id_for(&MenuAction::ToggleStartAtLogin),
+        "Start at login",
+        true,
+        model.start_at_login,
+        None,
+    ));
+    let _ = menu.append(&MenuItem::with_id(
         menu_id_for(&MenuAction::OpenHookLog),
         "Open hook log",
         true,
@@ -392,6 +413,8 @@ mod tests {
             MenuAction::ToggleAlwaysExpanded,
             MenuAction::OpenPetsFolder,
             MenuAction::InstallHooks,
+            MenuAction::InstallMcp,
+            MenuAction::ToggleStartAtLogin,
             MenuAction::OpenHookLog,
             MenuAction::SelectPet("airou-felyne".to_string()),
             MenuAction::SelectSize(3.0),

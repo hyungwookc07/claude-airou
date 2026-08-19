@@ -6,9 +6,12 @@
 # Re-run it any time to update: the binary is replaced, already-registered settings are left
 # alone. Everything it touches lives in your home directory; nothing needs sudo.
 #
-# Options (curl … | sh -s -- --minimal):
-#   --minimal          hooks + /hatch-pet skill only, no start-at-login
-#   --no-autostart     skip start-at-login
+# By default it registers the Claude Code hook, installs the /hatch-pet skill and starts the
+# overlay. Start-at-login, the status line and the MCP server are switches in the menu bar
+# 🐾 menu, so nothing you did not agree to gets registered behind your back.
+#
+# Options (curl … | sh -s -- --with-autostart):
+#   --with-autostart   also start the overlay at login (LaunchAgent)
 #   --with-statusline  also feed the usage gauge from your Claude Code status line
 #   --with-mcp         also register the MCP server for the Claude desktop app
 #   --no-setup         install the binary only, change no settings
@@ -31,7 +34,8 @@ should_run_setup=1
 for argument in "$@"; do
   case "$argument" in
     --no-setup) should_run_setup=0 ;;
-    --minimal|--no-autostart|--with-statusline|--with-mcp) setup_arguments="$setup_arguments $argument" ;;
+    --with-autostart|--with-statusline|--with-mcp) setup_arguments="$setup_arguments $argument" ;;
+    --minimal|--no-autostart) ;;  # the old spelling of today's default; accepted, no effect
     -h|--help) sed -n '2,20p' "$0" 2>/dev/null || true; exit 0 ;;
     *) echo "claude-airou: unknown option $argument" >&2; exit 2 ;;
   esac
@@ -115,6 +119,21 @@ esac
 if [ "$should_run_setup" -eq 1 ]; then
   # shellcheck disable=SC2086
   "$INSTALL_DIR/$BINARY_NAME" setup $setup_arguments
+
+  # setup only starts the overlay when it registers the login item. Start it here otherwise:
+  # without the menu bar icon there is nowhere to switch the remaining options on.
+  case " $setup_arguments " in
+    *" --with-autostart "*) ;;
+    *)
+      if ! pgrep -f "$BINARY_NAME run" >/dev/null 2>&1; then
+        # nohup so closing the terminal that ran the installer does not take the pet with it.
+        nohup "$INSTALL_DIR/$BINARY_NAME" run >/dev/null 2>&1 &
+        sleep 1
+        say ""
+        say "The pet is on screen now. Everything else lives in the menu bar 🐾 menu."
+      fi
+      ;;
+  esac
 else
   say "Skipped setup (--no-setup). Run \`$INSTALL_DIR/$BINARY_NAME setup\` when you are ready."
 fi
