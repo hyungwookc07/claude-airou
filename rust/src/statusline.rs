@@ -430,7 +430,13 @@ fn transcript_estimate_at(
             context_tokens: Some(context_tokens),
             total_input_tokens: None,
             total_output_tokens: None,
-            effort_level: None, // the transcript never carries it; only the status line JSON does
+            // Assistant entries carry the effort the turn ran at, so the aura works for
+            // sessions with no status line — including the desktop app, where the status
+            // line does not exist at all.
+            effort_level: object
+                .get("effort")
+                .and_then(Value::as_str)
+                .and_then(crate::model::EffortLevel::from_raw),
             model_display_name: if model.is_empty() { None } else { Some(model.to_string()) },
             five_hour_used_percentage: None,
             five_hour_resets_at_epoch_seconds: None,
@@ -878,6 +884,31 @@ mod tests {
         assert_eq!(snapshot.model_display_name.as_deref(), Some("claude-sonnet-4-5"));
         assert!(snapshot.total_cost_usd.is_none());
         assert!(snapshot.five_hour_used_percentage.is_none());
+    }
+
+    #[test]
+    fn transcript_estimate_reads_the_effort_the_turn_ran_at() {
+        // Real transcripts carry `effort` next to the message on assistant lines. This is
+        // the only effort source a desktop-app session has: the status line is CLI-only.
+        let with_effort = |line: &str, effort: &str| {
+            let mut object: Value = serde_json::from_str(line).unwrap();
+            object.as_object_mut().unwrap().insert("effort".into(), Value::String(effort.into()));
+            object.to_string()
+        };
+        let file = write_transcript(&[
+            &with_effort(&assistant_line(100, 0, 0, "claude-sonnet-4-5"), "low"),
+            &with_effort(&assistant_line(2000, 3000, 45000, "claude-sonnet-4-5"), "xhigh"),
+        ]);
+        let snapshot =
+            transcript_estimate_at(file.path().to_str().unwrap(), "sess-1", None, 42.0).expect("snapshot");
+        // The latest turn's level, like every other figure taken from that line.
+        assert_eq!(snapshot.effort_level, Some(crate::model::EffortLevel::XHigh));
+
+        // Older transcripts (and models without the parameter) simply have no effort key.
+        let plain = write_transcript(&[&assistant_line(2000, 3000, 45000, "claude-sonnet-4-5")]);
+        let snapshot =
+            transcript_estimate_at(plain.path().to_str().unwrap(), "sess-1", None, 42.0).expect("snapshot");
+        assert_eq!(snapshot.effort_level, None);
     }
 
     #[test]

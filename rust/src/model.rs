@@ -349,6 +349,11 @@ impl SessionUsageSnapshot {
         if self.model_display_name.is_none() {
             self.model_display_name = previous.model_display_name.clone();
         }
+        // Without this the aura blinks off every time an update arrives from a source that
+        // did not see the level (an older transcript line, a model without the parameter).
+        if self.effort_level.is_none() {
+            self.effort_level = previous.effort_level;
+        }
     }
 
     /// What should be on disk after `candidate` arrives on top of `self`; `None` = leave the
@@ -558,6 +563,43 @@ mod tests {
         assert!(snapshot.tool_name.is_none());
         assert!(snapshot.pending_tool_use_id.is_none());
         assert_eq!(snapshot.project_name(), "Claude Chat");
+    }
+
+    #[test]
+    fn a_merge_never_loses_a_known_effort_level() {
+        let base = SessionUsageSnapshot {
+            session_id: "s1".into(),
+            source: UsageSource::Transcript,
+            effort_level: Some(EffortLevel::High),
+            updated_at_epoch_seconds: 0.0,
+            context_used_percentage: Some(10.0),
+            context_window_size: None,
+            context_tokens: Some(1),
+            total_input_tokens: None,
+            total_output_tokens: None,
+            model_display_name: None,
+            five_hour_used_percentage: None,
+            five_hour_resets_at_epoch_seconds: None,
+            seven_day_used_percentage: None,
+            seven_day_resets_at_epoch_seconds: None,
+            total_cost_usd: None,
+        };
+        // A later reading that saw no level keeps the one we already knew: otherwise the
+        // aura would blink off on every refresh from a line without the key.
+        let mut newer = base.clone();
+        newer.effort_level = None;
+        newer.context_tokens = Some(2);
+        newer.context_used_percentage = Some(20.0);
+        let merged = base.merged(&newer, 1.0).expect("merge writes");
+        assert_eq!(merged.effort_level, Some(EffortLevel::High));
+
+        // A newer reading that saw a level replaces it (mid-session /effort changes).
+        let mut changed = base.clone();
+        changed.effort_level = Some(EffortLevel::Low);
+        changed.context_tokens = Some(3);
+        changed.context_used_percentage = Some(30.0);
+        let merged = base.merged(&changed, 1.0).expect("merge writes");
+        assert_eq!(merged.effort_level, Some(EffortLevel::Low));
     }
 
     #[test]
