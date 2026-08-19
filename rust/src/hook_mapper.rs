@@ -388,7 +388,14 @@ pub fn resolve(
         return Resolution::Keep(format!("idle_prompt while {}", existing_state.raw()));
     }
 
-    if user_is_blocked {
+    // A subagent's own Stop routinely lands a second or two after the main thread's Stop.
+    // Taking it at face value un-finishes a session that is done: the pet drops the check
+    // mark back to thinking and sits there until the busy state decays, while Claude Code
+    // rightly shows the session as finished. Real new work always announces itself with a
+    // non-subagent event (UserPromptSubmit, PreToolUse), so nothing is lost by ignoring it.
+    let result_is_final = matches!(existing_state, PetState::Done | PetState::Error);
+
+    if user_is_blocked || result_is_final {
         if let Some(existing) = existing {
             // Subagents keep running while the main thread waits on the user; ignore their chatter.
             if input.is_subagent_event() {
@@ -1087,6 +1094,51 @@ mod tests {
             resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
             Resolution::Write(_)
         ));
+    }
+
+    #[test]
+    fn resolve_keeps_a_finished_result_through_late_subagent_events() {
+        // The real sequence from a live session: Stop at 20:30:48, SubagentStop at 20:30:50.
+        // Before this rule the trailing event turned a finished session back into thinking,
+        // where it sat until the busy state decayed 15 minutes later.
+        for event_name in ["SubagentStop", "SubagentStart", "PostToolUse"] {
+            for state in [PetState::Done, PetState::Error] {
+                let mut existing = blocked_snapshot(state, None);
+                existing.last_event_name = "Stop".into();
+                let event = input(json!({
+                    "hook_event_name": event_name,
+                    "session_id": "s1",
+                    "agent_id": "agent-123"
+                }));
+                match resolve(Some(&existing), &event, PetState::Thinking, "Agent reported back", None, now_epoch_secs()) {
+                    Resolution::Keep(reason) => {
+                        assert_eq!(reason, format!("subagent {event_name} while {}", state.raw()))
+                    }
+                    Resolution::Write(_) => panic!("{event_name} must not un-finish {state:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_lets_real_work_replace_a_finished_result() {
+        // Only subagent chatter is ignored: the user's next turn still moves the pet on.
+        for (event_name, state) in [("UserPromptSubmit", PetState::Thinking), ("PreToolUse", PetState::Working)] {
+            let mut existing = blocked_snapshot(PetState::Done, None);
+            existing.last_event_name = "Stop".into();
+            let event = input(json!({
+                "hook_event_name": event_name,
+                "session_id": "s1",
+                "tool_name": "Read"
+            }));
+            assert!(
+                matches!(
+                    resolve(Some(&existing), &event, state, "…", None, now_epoch_secs()),
+                    Resolution::Write(_)
+                ),
+                "{event_name} should replace a finished result"
+            );
+        }
     }
 
     #[test]
