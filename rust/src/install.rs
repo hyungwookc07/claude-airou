@@ -975,23 +975,52 @@ impl McpInstaller {
     }
 }
 
-// MARK: - Overlay menu entry points (Swift: AppDelegate.installHooks / installStatusLine)
+// MARK: - Default-path entry points (overlay tray menu + `claude-airou setup`)
+// The Swift app only needed the two install halves (AppDelegate.installHooks /
+// installStatusLine); `setup` and `uninstall` drive the same installers headlessly.
 
 /// Installs the hooks into the default Claude settings; Ok carries the report summary
-/// (shown in an alert by the overlay), Err the failure text.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn install_hooks_from_menu() -> Result<String, String> {
+/// (shown in an alert by the overlay, printed by `setup`), Err the failure text.
+pub fn install_hooks_at_default_paths() -> Result<String, String> {
     HooksInstaller::new(crate::paths::claude_settings_file())
         .install()
         .map(|report| report.summary_text())
         .map_err(|error| error.to_string())
 }
 
-/// Wires the status line feed into the default Claude settings (see `install_hooks_from_menu`).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn install_statusline_from_menu() -> Result<String, String> {
+/// Wires the status line feed into the default Claude settings (see `install_hooks_at_default_paths`).
+pub fn install_statusline_at_default_paths() -> Result<String, String> {
     StatusLineInstaller::new(crate::paths::claude_settings_file())
         .install()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
+/// Registers the MCP server in the default Claude desktop app config.
+pub fn install_mcp_at_default_paths() -> Result<String, String> {
+    McpInstaller::new(crate::paths::claude_desktop_config_file())
+        .install()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
+pub fn uninstall_hooks_at_default_paths() -> Result<String, String> {
+    HooksInstaller::new(crate::paths::claude_settings_file())
+        .uninstall()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
+pub fn uninstall_statusline_at_default_paths() -> Result<String, String> {
+    StatusLineInstaller::new(crate::paths::claude_settings_file())
+        .uninstall()
+        .map(|report| report.summary_text())
+        .map_err(|error| error.to_string())
+}
+
+pub fn uninstall_mcp_at_default_paths() -> Result<String, String> {
+    McpInstaller::new(crate::paths::claude_desktop_config_file())
+        .uninstall()
         .map(|report| report.summary_text())
         .map_err(|error| error.to_string())
 }

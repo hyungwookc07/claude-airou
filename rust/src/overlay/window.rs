@@ -549,7 +549,7 @@ impl App {
                 self.relayout();
                 self.request_redraw();
             }
-            InstallStatusLine => match crate::install::install_statusline_from_menu() {
+            InstallStatusLine => match crate::install::install_statusline_at_default_paths() {
                 Ok(summary) => show_alert(
                     "Status line wired to claude-airou",
                     &format!("{summary}\n\nNew Claude Code sessions feed the gauge; your own status line keeps rendering."),
@@ -590,7 +590,7 @@ impl App {
                 open_with_finder(&directory);
             }
             ResetPosition => self.reset_position(),
-            InstallHooks => match crate::install::install_hooks_from_menu() {
+            InstallHooks => match crate::install::install_hooks_at_default_paths() {
                 Ok(summary) => show_alert("Claude Code hooks installed", &summary, false),
                 Err(error) => show_alert("Could not install hooks", &error, true),
             },

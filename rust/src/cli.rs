@@ -10,6 +10,13 @@ pub const USAGE_TEXT: &str = r#"claude-airou — a Codex-style desktop pet for C
 USAGE
   claude-airou                       Run the overlay (menu bar icon + floating pet; macOS)
   claude-airou run                   Same as above
+  claude-airou setup [--minimal] [--no-autostart] [--with-statusline] [--with-mcp]
+                                   Wire everything up in one go: Claude Code hooks, the
+                                   /hatch-pet skill and start-at-login (--minimal keeps
+                                   hooks + skill only). The status line and the MCP server
+                                   rewrite config you probably own, so they are opt-in.
+  claude-airou uninstall             Undo setup (hooks, status line, MCP, skill, login item);
+                                   keeps ~/.claude-airou and the binary itself
   claude-airou hook                  Claude Code hook entry point (reads hook JSON on stdin)
   claude-airou install-hooks [--print] [--settings PATH]
                                    Merge hook entries into ~/.claude/settings.json (backup first)
@@ -68,7 +75,18 @@ impl Parsed {
 }
 
 /// Options that never take a value; everything else written as `--name value` is an option.
-const BOOLEAN_FLAG_NAMES: [&str; 5] = ["solid", "print", "help", "version", "h"];
+const BOOLEAN_FLAG_NAMES: [&str; 10] = [
+    "solid",
+    "print",
+    "help",
+    "version",
+    "h",
+    "yes",
+    "minimal",
+    "no-autostart",
+    "with-statusline",
+    "with-mcp",
+];
 
 /// `--key value` becomes an option, `--flag` becomes a flag; `--key=value` is also accepted.
 pub fn parse(arguments: &[String]) -> Parsed {
@@ -116,6 +134,8 @@ pub fn dispatch(arguments: Vec<String>) -> i32 {
         "hook" => crate::hook::run(),
         "statusline" => crate::statusline::run(&arguments),
         "mcp" => crate::mcp::run(),
+        "setup" => crate::setup::run_setup(&parsed),
+        "uninstall" => crate::setup::run_uninstall(&parsed),
         "install-hooks" => crate::install::run_install_hooks(&parsed),
         "uninstall-hooks" => crate::install::run_uninstall_hooks(&parsed),
         "install-statusline" => crate::install::run_install_statusline(&parsed),

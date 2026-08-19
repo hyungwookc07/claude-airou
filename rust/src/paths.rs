@@ -66,6 +66,28 @@ pub fn claude_settings_file() -> PathBuf {
     home_dir().join(".claude").join("settings.json")
 }
 
+/// `~/.claude/skills/hatch-pet` — where `claude-airou setup` writes the /hatch-pet skill.
+pub fn claude_hatch_pet_skill_dir() -> PathBuf {
+    home_dir().join(".claude").join("skills").join("hatch-pet")
+}
+
+/// The LaunchAgent that starts the overlay at login (written by `claude-airou setup`).
+pub fn overlay_launch_agent_file() -> PathBuf {
+    home_dir()
+        .join("Library/LaunchAgents")
+        .join(format!("{OVERLAY_LAUNCH_AGENT_LABEL}.plist"))
+}
+
+/// Pre-rename LaunchAgent (`claude-pet`), removed by setup/uninstall when found.
+pub fn legacy_overlay_launch_agent_file() -> PathBuf {
+    home_dir()
+        .join("Library/LaunchAgents")
+        .join(format!("{LEGACY_OVERLAY_LAUNCH_AGENT_LABEL}.plist"))
+}
+
+pub const OVERLAY_LAUNCH_AGENT_LABEL: &str = "dev.claude-airou.overlay";
+pub const LEGACY_OVERLAY_LAUNCH_AGENT_LABEL: &str = "dev.claude-pet.overlay";
+
 /// Where the Claude desktop app (chat) reads its MCP servers from.
 #[cfg(target_os = "macos")]
 pub fn claude_desktop_config_file() -> PathBuf {
