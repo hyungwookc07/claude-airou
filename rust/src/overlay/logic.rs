@@ -1029,10 +1029,10 @@ mod tests {
         assert_eq!(collapsed.cards.len(), 1);
         assert_eq!(collapsed.cards[0].label, "waiting +2");
         assert_eq!(collapsed.cards[0].session_id.as_deref(), Some("waiting"));
-        assert_eq!(collapsed.primary_center_x(), 114.0);
+        assert_eq!(collapsed.primary_center_x(), 125.0);
         // Others by recency: "recent" goes right, "busy" left. Every x is shifted by the
         // aura margin the layout now reserves on each side.
-        assert_eq!(model.cards_description(), "busy[48-132] waiting[142-274]* recent[284-368]");
+        assert_eq!(model.cards_description(), "busy[59-143] waiting[153-285]* recent[295-379]");
     }
 
     #[test]

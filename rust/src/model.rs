@@ -223,20 +223,22 @@ impl EffortLevel {
         }
     }
 
-    /// The aura behind the pet: (inner radius, outer radius, peak opacity), radii as
-    /// multiples of the sprite's half-height. Three cues move together — the halo starts
-    /// further out, reaches further and burns brighter as effort rises — because any one
-    /// of them alone leaves neighbouring levels indistinguishable. The sprite covers
-    /// everything inside 1.0, so the inner radius is what decides where the halo *begins*
-    /// to be visible.
+    /// The aura behind the pet: (inner radius as a multiple of the sprite's half-height,
+    /// how much of the available room the halo fills, peak opacity).
+    ///
+    /// The outer edge is a *fraction of the room that exists* rather than a fixed multiple
+    /// of the sprite, because the halo has to fit whatever the layout could reserve: the
+    /// radius grows with the pet (Small/Medium/Large) while the panel cannot grow with it
+    /// without eating the desktop. Spending a share of the real room keeps every level
+    /// distinct at every size and makes a mid-slope cut impossible.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay-only
-    pub fn aura_radii_and_opacity(self) -> (f32, f32, f32) {
+    pub fn aura_inner_scale_band_and_opacity(self) -> (f32, f32, f32) {
         match self {
-            EffortLevel::Low => (0.78, 1.10, 0.14),
-            EffortLevel::Medium => (0.84, 1.30, 0.21),
-            EffortLevel::High => (0.90, 1.48, 0.28),
-            EffortLevel::XHigh => (0.96, 1.64, 0.36),
-            EffortLevel::Max => (1.02, 1.78, 0.45),
+            EffortLevel::Low => (0.78, 0.34, 0.14),
+            EffortLevel::Medium => (0.84, 0.52, 0.21),
+            EffortLevel::High => (0.90, 0.68, 0.28),
+            EffortLevel::XHigh => (0.96, 0.85, 0.36),
+            EffortLevel::Max => (1.02, 1.00, 0.45),
         }
     }
 }
@@ -615,16 +617,16 @@ mod tests {
             EffortLevel::XHigh,
             EffortLevel::Max,
         ] {
-            let (inner, outer, opacity) = level.aura_radii_and_opacity();
+            let (inner, band, opacity) = level.aura_inner_scale_band_and_opacity();
             assert!(inner > previous.0, "{level:?} should start further out than the level below");
-            assert!(outer > previous.1, "{level:?} should reach further than the level below");
+            assert!(band > previous.1, "{level:?} should reach further than the level below");
             assert!(opacity > previous.2, "{level:?} should be brighter than the level below");
-            assert!(outer > inner, "{level:?} needs a visible band");
             assert!(opacity <= 0.45, "{level:?} must stay a glow, not a lamp");
-            // The reserved margin is what the outer radius is allowed to spend; overshooting
-            // it means the halo is clipped again and the size ramp silently disappears.
-            assert!(outer <= 1.8, "{level:?} exceeds the room reserved by AURA_RESERVED_MARGIN");
-            previous = (inner, outer, opacity);
+            // A band is a share of the room that exists, so it can never exceed it. (The old
+            // form of this check compared a radius ratio against a point budget and passed
+            // while the halo was being cut in half.)
+            assert!(band > 0.0 && band <= 1.0, "{level:?} must spend a share of the room, not more");
+            previous = (inner, band, opacity);
         }
     }
 
