@@ -219,6 +219,7 @@ mod tests {
             tool_name: Some("Bash".into()),
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: Some("toolu_pending".into()),
+            active_agent_ids: Vec::new(),
         };
         fixture.store.write(&blocked).unwrap();
         process(

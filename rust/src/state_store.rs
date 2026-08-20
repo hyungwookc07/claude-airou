@@ -219,6 +219,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: None,
+            active_agent_ids: Vec::new(),
         }
     }
 

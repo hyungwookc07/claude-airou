@@ -29,6 +29,36 @@ pub const SUBSCRIBED_EVENT_NAMES: [&str; 17] = [
     "ElicitationResult",
 ];
 
+/// The subagents working for a session right now, after applying this event.
+///
+/// Any event carrying an `agent_id` counts as that agent being alive — relying on
+/// `SubagentStart` alone would miss agents that were already running when the hook was
+/// installed. `SubagentStop` retires one, and a turn boundary retires all of them: an
+/// agent whose Stop we never see would otherwise haunt the pet until the session ends.
+fn agent_ids_after(existing: Option<&SessionSnapshot>, input: &HookInput) -> Vec<String> {
+    const TURN_BOUNDARY_EVENT_NAMES: [&str; 4] =
+        ["UserPromptSubmit", "Stop", "StopFailure", "SessionStart"];
+    if TURN_BOUNDARY_EVENT_NAMES.contains(&input.hook_event_name()) {
+        return Vec::new();
+    }
+    let mut ids: Vec<String> = existing.map(|e| e.active_agent_ids.clone()).unwrap_or_default();
+    let Some(agent_id) = input.agent_id() else {
+        return ids;
+    };
+    if input.hook_event_name() == "SubagentStop" {
+        ids.retain(|id| id != agent_id);
+        return ids;
+    }
+    if !ids.iter().any(|id| id == agent_id) {
+        ids.push(agent_id.to_string());
+    }
+    if ids.len() > SessionSnapshot::MAXIMUM_TRACKED_AGENTS {
+        let excess = ids.len() - SessionSnapshot::MAXIMUM_TRACKED_AGENTS;
+        ids.drain(0..excess);
+    }
+    ids
+}
+
 /// Subagent events that mean "an agent finished a piece of work". They routinely trail
 /// the main thread's own Stop, so a session already showing a result ignores them; the
 /// starting half (`SubagentStart`, an agent's `PreToolUse`) is real activity and is not
@@ -452,6 +482,7 @@ pub fn resolve(
         tool_name: tool_name.map(str::to_string),
         updated_at_epoch_seconds: now_secs,
         pending_tool_use_id: None,
+        active_agent_ids: agent_ids_after(existing, input),
     };
     if mapped_state.is_attention_needed() {
         // PermissionRequest / PreToolUse(AskUserQuestion) carry tool_use_id; a Notification
@@ -908,6 +939,7 @@ mod tests {
             tool_name: Some("Bash".into()),
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: pending.map(str::to_string),
+            active_agent_ids: Vec::new(),
         }
     }
 
@@ -1115,6 +1147,63 @@ mod tests {
             resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
             Resolution::Write(_)
         ));
+    }
+
+    #[test]
+    fn agent_ids_track_who_is_working() {
+        let event = |name: &str, agent: Option<&str>| {
+            let mut object = json!({"hook_event_name": name, "session_id": "s1", "cwd": "/tmp"});
+            if let Some(agent) = agent {
+                object.as_object_mut().unwrap().insert("agent_id".into(), json!(agent));
+            }
+            input(object)
+        };
+        let with_ids = |ids: &[&str]| {
+            let mut snapshot = blocked_snapshot(PetState::Working, None);
+            snapshot.active_agent_ids = ids.iter().map(|id| id.to_string()).collect();
+            snapshot
+        };
+
+        // Starting agents accumulate; a stop retires exactly one.
+        assert_eq!(agent_ids_after(None, &event("SubagentStart", Some("a1"))), vec!["a1"]);
+        let one = with_ids(&["a1"]);
+        assert_eq!(
+            agent_ids_after(Some(&one), &event("SubagentStart", Some("a2"))),
+            vec!["a1", "a2"]
+        );
+        let two = with_ids(&["a1", "a2"]);
+        assert_eq!(agent_ids_after(Some(&two), &event("SubagentStop", Some("a1"))), vec!["a2"]);
+
+        // An agent we never saw start still counts: its tool calls give it away.
+        assert_eq!(
+            agent_ids_after(Some(&one), &event("PreToolUse", Some("a9"))),
+            vec!["a1", "a9"]
+        );
+        // Seeing the same agent again does not double it.
+        assert_eq!(agent_ids_after(Some(&one), &event("PostToolUse", Some("a1"))), vec!["a1"]);
+
+        // A turn boundary retires everyone: an agent whose Stop never arrived would
+        // otherwise haunt the pet for the rest of the session.
+        for name in ["UserPromptSubmit", "Stop", "StopFailure", "SessionStart"] {
+            assert!(
+                agent_ids_after(Some(&two), &event(name, None)).is_empty(),
+                "{name} should clear the roster"
+            );
+        }
+
+        // Events with no agent leave the roster alone.
+        assert_eq!(agent_ids_after(Some(&two), &event("PreToolUse", None)), vec!["a1", "a2"]);
+
+        // The roster is bounded; the oldest fall off.
+        let many: Vec<String> = (0..SessionSnapshot::MAXIMUM_TRACKED_AGENTS)
+            .map(|index| format!("a{index}"))
+            .collect();
+        let mut full = blocked_snapshot(PetState::Working, None);
+        full.active_agent_ids = many;
+        let after = agent_ids_after(Some(&full), &event("SubagentStart", Some("newcomer")));
+        assert_eq!(after.len(), SessionSnapshot::MAXIMUM_TRACKED_AGENTS);
+        assert_eq!(after.last().unwrap(), "newcomer");
+        assert_eq!(after.first().unwrap(), "a1", "the oldest is dropped");
     }
 
     #[test]

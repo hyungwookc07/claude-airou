@@ -5,6 +5,16 @@
 
 use super::row_layout::{GridSize, RowCard, RowLayout};
 use crate::model::{EffortLevel, GaugeMetric, PetState, SessionSnapshot, SessionUsageSnapshot};
+
+/// More clones than this is a crowd, not information: the row has to stay readable and
+/// each extra copy costs a full sprite blit per frame.
+pub const MAXIMUM_DRAWN_AGENT_SHADOWS: usize = 3;
+
+/// Where each clone stands relative to the pet, as a fraction of the sprite's half-height:
+/// behind and a little below, fanning outwards, each fainter than the last. Kept inside the
+/// aura's reserved margin so a clone can never be the thing that gets clipped.
+pub const AGENT_SHADOW_PLACEMENTS: [(f32, f32, f32); MAXIMUM_DRAWN_AGENT_SHADOWS] =
+    [(-0.36, 0.14, 0.52), (0.36, 0.14, 0.46), (0.0, 0.28, 0.40)];
 use std::collections::HashMap;
 
 /// Seconds a pet-click reaction phrase stays on screen (Swift: `petReactionDurationSeconds`).
@@ -324,6 +334,21 @@ impl OverlayModel {
             .and_then(|usage| usage.effort_level)
     }
 
+    /// How many shadow clones to draw behind a card's pet: one per subagent working for
+    /// that session, and only while it is actually busy — a finished session has no
+    /// helpers to show, whatever the roster still says.
+    pub fn agent_shadow_count_for_card(&self, card: &RowCard, is_hidden: bool) -> usize {
+        if is_hidden {
+            return 0;
+        }
+        if !matches!(self.state_for_card(card), PetState::Thinking | PetState::Working) {
+            return 0;
+        }
+        self.session_with_id(card.session_id.as_deref())
+            .map(|session| session.active_agent_ids.len().min(MAXIMUM_DRAWN_AGENT_SHADOWS))
+            .unwrap_or(0)
+    }
+
     /// Remaining percentage for a card's gauge, or None when unknown.
     pub fn gauge_value_for_card(&self, card: &RowCard, metric: GaugeMetric) -> Option<f64> {
         let usage = card.session_id.as_ref().and_then(|id| self.usage_by_session.get(id));
@@ -606,6 +631,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs() - age_secs,
             pending_tool_use_id: None,
+            active_agent_ids: Vec::new(),
         }
     }
 

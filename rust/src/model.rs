@@ -146,9 +146,18 @@ pub struct SessionSnapshot {
     /// While waiting on the user for a specific tool call, the id of that call.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pending_tool_use_id: Option<String>,
+    /// Subagents currently working for this session, newest last. The overlay draws one
+    /// shadow clone behind the pet per entry. Kept short (`MAXIMUM_TRACKED_AGENTS`): the
+    /// pet only shows a handful, and an id we never see finish would otherwise linger.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub active_agent_ids: Vec<String>,
 }
 
 impl SessionSnapshot {
+    /// More than this many concurrent agents changes nothing on screen, so the tail is
+    /// dropped rather than grown without bound.
+    pub const MAXIMUM_TRACKED_AGENTS: usize = 8;
+
     pub fn project_name(&self) -> String {
         let name = std::path::Path::new(&self.cwd)
             .file_name()
@@ -465,6 +474,7 @@ pub struct AppConfig {
     pub is_pet_hidden: bool,
     pub is_sessions_always_expanded: bool,
     pub is_effort_aura_hidden: bool,
+    pub is_agent_shadows_hidden: bool,
     #[serde(deserialize_with = "lenient_gauge_metric")]
     pub gauge_metric: GaugeMetric,
 }
@@ -492,6 +502,7 @@ impl Default for AppConfig {
             is_pet_hidden: false,
             is_sessions_always_expanded: false,
             is_effort_aura_hidden: false,
+            is_agent_shadows_hidden: false,
             gauge_metric: GaugeMetric::ContextRemaining,
         }
     }
@@ -680,6 +691,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs() - 10.0,
             pending_tool_use_id: None,
+            active_agent_ids: Vec::new(),
         };
         assert_eq!(snapshot.effective_state(), PetState::Idle);
     }
@@ -696,6 +708,7 @@ mod tests {
                 tool_name: None,
                 updated_at_epoch_seconds: now_epoch_secs() - 3.0 * 60.0 * 60.0,
                 pending_tool_use_id: None,
+                active_agent_ids: Vec::new(),
             };
             assert_eq!(snapshot.effective_state(), state, "{state:?} must not decay");
         }
@@ -712,6 +725,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: None,
+            active_agent_ids: Vec::new(),
         };
         // Fresh resume: the wave is still showing.
         assert!(!snapshot.is_opened_without_activity());

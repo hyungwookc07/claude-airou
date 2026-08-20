@@ -25,7 +25,7 @@ use winit::window::{Window, WindowId, WindowLevel};
 
 use super::animation;
 use super::draw::{self, Canvas, Color};
-use super::logic::{ClickAction, LayoutChange, LayoutInputs, OverlayModel};
+use super::logic::{ClickAction, LayoutChange, LayoutInputs, OverlayModel, AGENT_SHADOW_PLACEMENTS};
 use super::placement;
 use super::present_macos::{
     accent_color_rgb, is_dark_appearance, main_screen_visible_frame, screen_visible_frames, show_alert,
@@ -101,6 +101,21 @@ const GAUGE_HORIZONTAL_PADDING: f32 = 5.0;
 const GAUGE_ITEM_SPACING: f32 = 3.0;
 /// Side cards are drawn at 92 % opacity (Swift `.opacity(card.isPrimary ? 1 : 0.92)`).
 const SIDE_CARD_OPACITY: f32 = 0.92;
+/// Repaints an RGBA sprite as a flat silhouette: the shape is kept, the colours are not.
+/// Used for the agent shadow clones, where the pet's own palette behind the pet would read
+/// as a crowd rather than as its shadows.
+fn flattened_rgba(rgba: &[u8], colour: Color, opacity: f32) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    for pixel in out.chunks_exact_mut(4) {
+        let alpha = pixel[3] as f32 * opacity;
+        pixel[0] = colour.red;
+        pixel[1] = colour.green;
+        pixel[2] = colour.blue;
+        pixel[3] = alpha.round().clamp(0.0, 255.0) as u8;
+    }
+    out
+}
+
 /// Room above a card for the hop (-14 pt) and the floating heart (rises 28 pt from 6 pt above the sprite).
 const CARD_CANVAS_TOP_MARGIN: f32 = 48.0;
 /// The heart symbol size and its resting offset above the sprite (SF `heart.fill` 14 pt, offset -6).
@@ -120,6 +135,8 @@ struct Theme {
     gray: Color,
     pink: Color,
     accent: Color,
+    /// Flat tone the agent shadow clones are painted in.
+    agent_shadow: Color,
 }
 
 impl Theme {
@@ -138,6 +155,9 @@ impl Theme {
                 gray: Color::rgb(152, 152, 157),
                 pink: Color::rgb(255, 55, 95),
                 accent: accent_color.unwrap_or(Color::rgb(10, 132, 255)),
+                // Mid-tone on purpose: a near-black shadow vanishes on a dark desktop and a
+                // pale one vanishes into the aura, so neither extreme survives both.
+                agent_shadow: Color::rgb(126, 112, 160),
             }
         } else {
             Theme {
@@ -151,6 +171,7 @@ impl Theme {
                 gray: Color::rgb(142, 142, 147),
                 pink: Color::rgb(255, 45, 85),
                 accent: accent_color.unwrap_or(Color::rgb(0, 122, 255)),
+                agent_shadow: Color::rgb(78, 62, 108),
             }
         }
     }
@@ -496,6 +517,7 @@ impl App {
             pet_hidden: self.config.is_pet_hidden,
             start_at_login: crate::setup::is_login_autostart_installed(),
             effort_aura_hidden: self.config.is_effort_aura_hidden,
+            agent_shadows_hidden: self.config.is_agent_shadows_hidden,
         }
     }
 
@@ -567,6 +589,11 @@ impl App {
             }
             ToggleEffortAura => {
                 self.config.is_effort_aura_hidden = !self.config.is_effort_aura_hidden;
+                self.config.save();
+                self.request_redraw();
+            }
+            ToggleAgentShadows => {
+                self.config.is_agent_shadows_hidden = !self.config.is_agent_shadows_hidden;
                 self.config.save();
                 self.request_redraw();
             }
@@ -982,6 +1009,40 @@ impl App {
             if let Ok((rgba, image_width, image_height)) =
                 crate::render::frame_rgba(frame, &self.palette, sprite_pixel_scale, None)
             {
+                // Shadow clones: one per working subagent, standing behind the pet. Same
+                // sprite, flattened to a single dark tone, so it reads as the pet's own
+                // shadow rather than a second creature.
+                let shadow_count = self
+                    .model
+                    .agent_shadow_count_for_card(card, self.config.is_agent_shadows_hidden);
+                if shadow_count > 0 {
+                    // One pixel-scale smaller, so a clone reads as standing behind the pet
+                    // rather than as a second pet that happens to be grey.
+                    let shadow_pixel_scale = sprite_pixel_scale.saturating_sub(1).max(1);
+                    if let Ok((shadow_rgba, shadow_width, shadow_height)) =
+                        crate::render::frame_rgba(frame, &self.palette, shadow_pixel_scale, None)
+                    {
+                        let half_height = sprite_height_points / 2.0;
+                        let sprite_center_x = sprite_left as f32 + image_width as f32 / 2.0;
+                        let sprite_center_y = sprite_top as f32 + image_height as f32 / 2.0;
+                        for (offset_x, offset_y, opacity) in
+                            AGENT_SHADOW_PLACEMENTS.iter().take(shadow_count)
+                        {
+                            let shadow = flattened_rgba(&shadow_rgba, self.theme.agent_shadow, *opacity);
+                            let left = sprite_center_x + offset_x * half_height * scale
+                                - shadow_width as f32 / 2.0;
+                            let top = sprite_center_y + offset_y * half_height * scale
+                                - shadow_height as f32 / 2.0;
+                            card_canvas.blit_rgba(
+                                &shadow,
+                                shadow_width,
+                                shadow_height,
+                                left.round() as i32,
+                                top.round() as i32,
+                            );
+                        }
+                    }
+                }
                 card_canvas.blit_rgba(&rgba, image_width, image_height, sprite_left, sprite_top);
             }
         }
