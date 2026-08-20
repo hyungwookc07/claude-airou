@@ -32,7 +32,8 @@ use super::present_macos::{
     window_background_rgb, AppKitWindow, LayerPresenter,
 };
 use super::row_layout::{
-    GridSize, RowCard, RowLayout, CARD_VERTICAL_SPACING, GAUGE_RESERVED_HEIGHT, SESSION_BADGE_RESERVED_HEIGHT,
+    GridSize, RowCard, RowLayout, AURA_RESERVED_MARGIN, CARD_VERTICAL_SPACING, GAUGE_RESERVED_HEIGHT,
+    SESSION_BADGE_RESERVED_HEIGHT,
     SPEECH_BUBBLE_BOTTOM_INSET, SPEECH_BUBBLE_MAX_WIDTH, SPEECH_BUBBLE_RESERVED_HEIGHT,
 };
 use super::text::{FontStyle, TextRasterizer};
@@ -893,9 +894,12 @@ impl App {
     /// overflow up to 200 pt) and taller (room for the hop and the heart above the sprite).
     fn paint_card(&mut self, card: &RowCard, layout: &RowLayout, now: f64) -> Canvas {
         let scale = self.scale_factor();
-        let canvas_width_points = card.width.max(SESSION_LABEL_MAX_WIDTH + 8.0);
+        // The aura margin is part of the buffer on every side: the canvas is centred on the
+        // card, so a wider buffer just means the halo has somewhere to go.
+        let canvas_width_points =
+            card.width.max(SESSION_LABEL_MAX_WIDTH + 8.0) + AURA_RESERVED_MARGIN * 2.0;
         let card_height = layout.card_height();
-        let canvas_height_points = CARD_CANVAS_TOP_MARGIN + card_height;
+        let canvas_height_points = CARD_CANVAS_TOP_MARGIN + AURA_RESERVED_MARGIN + card_height;
         let mut card_canvas = Canvas::new(
             (canvas_width_points * scale).round() as u32,
             (canvas_height_points * scale).round() as u32,
@@ -937,17 +941,15 @@ impl App {
         let sprite_top = ((sprite_bottom - sprite_height_points + sprite_offset_y) * scale).round() as i32;
         // Aura first, so the sprite sits on top of its own glow.
         if let Some(effort) = self.model.effort_aura_for_card(card, self.config.is_effort_aura_hidden) {
-            let (radius_scale, opacity) = effort.aura_radius_and_opacity();
+            let (inner_scale, outer_scale, opacity) = effort.aura_radii_and_opacity();
             let sprite_center_x = center_x + sprite_offset_x;
             let sprite_center_y = sprite_bottom - sprite_height_points / 2.0 + sprite_offset_y;
-            // The flat core reaches roughly the sprite's own edge; the band beyond it is
-            // what the user actually sees, and that is what effort grows.
             let half_height = sprite_height_points / 2.0;
             card_canvas.fill_radial_glow(
                 sprite_center_x * scale,
                 sprite_center_y * scale,
-                half_height * 0.72 * scale,
-                half_height * radius_scale * scale,
+                half_height * inner_scale * scale,
+                half_height * outer_scale * scale,
                 self.theme.accent.with_opacity(if card.is_primary { opacity } else { opacity * 0.6 }),
             );
         }

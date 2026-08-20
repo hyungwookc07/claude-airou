@@ -30,6 +30,13 @@ impl RowCard {
 
 pub const MINIMUM_CONTENT_WIDTH: f32 = 220.0;
 pub const HORIZONTAL_PADDING: f32 = 16.0;
+/// Room reserved on every side for the effort aura. Without it the halo is clipped by the
+/// card canvas about 30 pt out, which flattens the size ramp to nothing: `max` ends up
+/// only brighter than `low`, never wider. Reserved unconditionally so the panel geometry
+/// (and the user's saved window origin) does not jump when a session changes effort.
+/// Kept modest on purpose: the panel takes mouse clicks unless click-through is on, so
+/// every reserved point is also a point of desktop the user can no longer click.
+pub const AURA_RESERVED_MARGIN: f32 = 32.0;
 pub const CARD_SPACING: f32 = 10.0;
 pub const MINIMUM_CARD_WIDTH: f32 = 72.0;
 pub const MAXIMUM_CARD_WIDTH: f32 = 132.0;
@@ -132,7 +139,8 @@ impl RowLayout {
 
         let row_width: f32 =
             card_widths.iter().sum::<f32>() + CARD_SPACING * (card_widths.len().saturating_sub(1)) as f32;
-        let mut content_width = MINIMUM_CONTENT_WIDTH.max(row_width + HORIZONTAL_PADDING * 2.0);
+        let mut content_width =
+            MINIMUM_CONTENT_WIDTH.max(row_width + (HORIZONTAL_PADDING + AURA_RESERVED_MARGIN) * 2.0);
         let mut row_leading = ((content_width - row_width) / 2.0).round();
 
         // Make room for the bubble around the primary card's centre (it may sit off-centre in the row).
@@ -216,9 +224,10 @@ mod tests {
         let card = &layout.cards[0];
         // sprite 140 > max card 132 -> clamped to 132, already even.
         assert_eq!(card.width, 132.0);
-        assert_eq!(layout.content_width, 220.0);
-        assert_eq!(card.x, 44.0);
-        assert_eq!(layout.primary_center_x(), 110.0);
+        // 132 + 2 * (16 padding + 32 aura margin); the minimum width no longer binds.
+        assert_eq!(layout.content_width, 228.0);
+        assert_eq!(card.x, 48.0);
+        assert_eq!(layout.primary_center_x(), 114.0);
         assert_eq!(layout.content_height, 66.0 + 140.0 + 22.0 + 12.0);
         assert_eq!(layout.card_height(), 140.0 + 22.0 + 4.0);
         assert!(card.is_primary);
@@ -265,19 +274,25 @@ mod tests {
         let scales: Vec<f32> = layout.cards.iter().map(|card| card.pixel_scale).collect();
         assert_eq!(scales, vec![3.0, 5.0, 3.0]);
         let row_width = 84.0 + 132.0 + 84.0 + 2.0 * CARD_SPACING;
-        assert_eq!(layout.content_width, row_width + 2.0 * HORIZONTAL_PADDING);
-        assert_eq!(layout.cards[0].x, 16.0);
-        assert_eq!(layout.cards[1].x, 16.0 + 84.0 + 10.0);
-        assert_eq!(layout.cards[2].x, 16.0 + 84.0 + 10.0 + 132.0 + 10.0);
+        assert_eq!(
+            layout.content_width,
+            row_width + 2.0 * (HORIZONTAL_PADDING + AURA_RESERVED_MARGIN)
+        );
+        let leading = HORIZONTAL_PADDING + AURA_RESERVED_MARGIN;
+        assert_eq!(layout.cards[0].x, leading);
+        assert_eq!(layout.cards[1].x, leading + 84.0 + 10.0);
+        assert_eq!(layout.cards[2].x, leading + 84.0 + 10.0 + 132.0 + 10.0);
         assert!(layout.cards[1].is_primary);
-        assert_eq!(layout.primary_center_x(), 16.0 + 94.0 + 66.0);
+        assert_eq!(layout.primary_center_x(), leading + 94.0 + 66.0);
         // Primary sprite size is unaffected by the side cards.
         assert_eq!(layout.primary_sprite_width, 140.0);
-        // Hit testing.
-        assert_eq!(layout.card_at_content_x(20.0).unwrap().id(), "l");
-        assert_eq!(layout.card_at_content_x(150.0).unwrap().id(), "m");
+        // Hit testing. Cards now sit at l[48-132] m[142-274] r[284-368]; the reserved aura
+        // margin is empty space, so a click out there hits no card.
+        assert_eq!(layout.card_at_content_x(60.0).unwrap().id(), "l");
+        assert_eq!(layout.card_at_content_x(200.0).unwrap().id(), "m");
         assert_eq!(layout.card_at_content_x(300.0).unwrap().id(), "r");
-        assert!(layout.card_at_content_x(105.0).is_none(), "gap between cards");
+        assert!(layout.card_at_content_x(137.0).is_none(), "gap between cards");
+        assert!(layout.card_at_content_x(20.0).is_none(), "inside the reserved aura margin");
         assert!(layout.card_at_content_x(-1.0).is_none());
         assert!(layout.card_at_content_x(1000.0).is_none());
     }
@@ -296,11 +311,11 @@ mod tests {
         assert_eq!(clamped.content_width, 308.0);
         let negative = RowLayout::make(GRID, 5.0, &labels(&["p"]), &ids(&[Some("p")]), 0, -5.0, false);
         assert_eq!(negative.speech_bubble_width, 0.0);
-        assert_eq!(negative.content_width, 220.0);
+        assert_eq!(negative.content_width, 228.0);
         // A small bubble fits without changing the width.
         let small = RowLayout::make(GRID, 5.0, &labels(&["p"]), &ids(&[Some("p")]), 0, 120.0, false);
-        assert_eq!(small.content_width, 220.0);
-        assert_eq!(small.primary_center_x(), 110.0);
+        assert_eq!(small.content_width, 228.0);
+        assert_eq!(small.primary_center_x(), 114.0);
     }
 
     #[test]
@@ -315,11 +330,11 @@ mod tests {
             200.0,
             false,
         );
-        // Row: 132 + 10 + 84 = 226 -> content 258, leading 16, primary centre 82.
-        // bubbleHalf 104 -> left shortfall 22 -> leading 38, content 280, centre 104.
-        assert_eq!(layout.cards[0].x, 38.0);
-        assert_eq!(layout.primary_center_x(), 104.0);
-        assert_eq!(layout.content_width, 280.0);
+        // Row: 132 + 10 + 84 = 226 -> content 322, leading 48, primary centre 114.
+        // bubbleHalf 104 < 114, so the bubble already fits and the row does not shift.
+        assert_eq!(layout.cards[0].x, 48.0);
+        assert_eq!(layout.primary_center_x(), 114.0);
+        assert_eq!(layout.content_width, 322.0);
     }
 
     #[test]
