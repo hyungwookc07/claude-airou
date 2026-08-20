@@ -325,6 +325,42 @@ impl Canvas {
     /// at (`x`, `y`), scaled by `scale` (nearest-neighbour sampling, anchored top-left) and
     /// multiplied by `opacity`. `scale == 1` at whole-pixel offsets is an exact copy, so
     /// crisp pet pixels stay crisp when nothing is animating.
+    /// `blit_rgba` with a uniform opacity applied on the way in, so one prepared image can
+    /// be drawn several times at different strengths without copying it per draw.
+    pub fn blit_rgba_with_opacity(
+        &mut self,
+        image: &[u8],
+        image_width: u32,
+        image_height: u32,
+        x: i32,
+        y: i32,
+        opacity: f32,
+    ) {
+        let opacity = opacity.clamp(0.0, 1.0);
+        if opacity <= 0.0 {
+            return;
+        }
+        for row in 0..image_height as i32 {
+            for column in 0..image_width as i32 {
+                let offset = ((row as u32 * image_width + column as u32) * 4) as usize;
+                let Some(pixel) = image.get(offset..offset + 4) else {
+                    continue;
+                };
+                let alpha = pixel[3] as f32 * opacity;
+                if alpha < 0.5 {
+                    continue;
+                }
+                let colour = Color {
+                    red: pixel[0],
+                    green: pixel[1],
+                    blue: pixel[2],
+                    alpha: alpha.round().clamp(0.0, 255.0) as u8,
+                };
+                self.blend_pixel(x + column, y + row, premultiply(colour));
+            }
+        }
+    }
+
     pub fn blit_canvas(&mut self, source: &Canvas, x: f32, y: f32, scale: f32, opacity: f32) {
         if source.width == 0 || source.height == 0 || scale <= 0.0 || opacity <= 0.0 {
             return;

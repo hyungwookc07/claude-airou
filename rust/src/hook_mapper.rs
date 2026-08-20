@@ -2,7 +2,7 @@
 //! policy for concurrent events. Port of `Hook/HookEventMapper.swift` (incl. ToolSummarizer)
 //! and `Hook/HookMergePolicy.swift` — behaviour must match 1:1.
 
-use crate::model::{PetState, SessionSnapshot};
+use crate::model::{ActiveAgent, PetState, SessionSnapshot};
 use serde_json::Value;
 
 /// Events the installer registers. Anything else is ignored if it ever arrives.
@@ -28,6 +28,66 @@ pub const SUBSCRIBED_EVENT_NAMES: [&str; 17] = [
     "Elicitation",
     "ElicitationResult",
 ];
+
+/// The subagents working for a session right now, after applying this event.
+///
+/// Any event carrying an `agent_id` refreshes that agent — relying on `SubagentStart`
+/// alone would miss agents that were already running when the hook was installed.
+/// `SubagentStop` retires one, and a turn boundary retires all.
+///
+/// Every entry carries the last time we heard from it, because none of those signals can
+/// be trusted on its own: a stop can be dropped by the merge policy (the session was
+/// showing a result, or waiting on the user), lost to a race between two hook processes
+/// writing the same file, or never sent. Anything unheard-of for
+/// `AGENT_ALIVE_WINDOW_SECS` stops counting, so those leaks expire instead of haunting
+/// the pet until the next prompt.
+fn agents_after(
+    existing: Option<&SessionSnapshot>,
+    input: &HookInput,
+    now_secs: f64,
+) -> Vec<ActiveAgent> {
+    const TURN_BOUNDARY_EVENT_NAMES: [&str; 3] = ["UserPromptSubmit", "Stop", "StopFailure"];
+    let is_turn_boundary = TURN_BOUNDARY_EVENT_NAMES.contains(&input.hook_event_name())
+        // SessionStart also fires mid-turn after compaction, with the agents still running.
+        || (input.hook_event_name() == "SessionStart" && input.session_start_source() != Some("compact"));
+    if is_turn_boundary {
+        return Vec::new();
+    }
+
+    let mut agents: Vec<ActiveAgent> = existing
+        .map(|snapshot| snapshot.active_agents.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|agent| now_secs - agent.last_seen_epoch_seconds <= SessionSnapshot::AGENT_ALIVE_WINDOW_SECS)
+        .collect();
+
+    let Some(agent_id) = input.agent_id() else {
+        return agents;
+    };
+    if input.hook_event_name() == "SubagentStop" {
+        agents.retain(|agent| agent.id != agent_id);
+        return agents;
+    }
+    match agents.iter_mut().find(|agent| agent.id == agent_id) {
+        Some(agent) => agent.last_seen_epoch_seconds = now_secs,
+        None => agents.push(ActiveAgent {
+            id: agent_id.to_string(),
+            last_seen_epoch_seconds: now_secs,
+        }),
+    }
+    if agents.len() > SessionSnapshot::MAXIMUM_TRACKED_AGENTS {
+        // Drop the stalest, not the oldest-added: the long-running agent is the one still
+        // working, and a burst of short-lived ones is what pushes the list over.
+        agents.sort_by(|a, b| {
+            a.last_seen_epoch_seconds
+                .partial_cmp(&b.last_seen_epoch_seconds)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let excess = agents.len() - SessionSnapshot::MAXIMUM_TRACKED_AGENTS;
+        agents.drain(0..excess);
+    }
+    agents
+}
 
 /// Subagent events that mean "an agent finished a piece of work". They routinely trail
 /// the main thread's own Stop, so a session already showing a result ignores them; the
@@ -369,6 +429,10 @@ pub fn truncate(text: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Resolution {
+    /// The event itself is chatter, but it changed who is working for the session: write
+    /// the roster and leave state, message and timing exactly as they were. Without this
+    /// every `Keep` below would silently drop a `SubagentStop` — and a stop is sent once.
+    RosterOnly(SessionSnapshot),
     Write(SessionSnapshot),
     Keep(String),
 }
@@ -387,12 +451,23 @@ pub fn resolve(
     let existing_state = existing.map(SessionSnapshot::effective_state).unwrap_or(PetState::Idle);
     let user_is_blocked = existing_state.is_attention_needed();
 
+    // Who is working for this session, whatever we decide about the event itself.
+    let agents = agents_after(existing, input, now_secs);
+    let keep = |reason: String| match existing {
+        Some(existing) if existing.active_agents != agents => {
+            let mut snapshot = existing.clone();
+            snapshot.active_agents = agents.clone();
+            Resolution::RosterOnly(snapshot)
+        }
+        _ => Resolution::Keep(reason),
+    };
+
     // "Claude finished ~60 s ago and you haven't typed" — the finished/failed result is
     // exactly what the user still wants to see, so idle_prompt only clears busy states.
     if input.notification_type() == Some("idle_prompt")
         && matches!(existing_state, PetState::Done | PetState::Error)
     {
-        return Resolution::Keep(format!("idle_prompt while {}", existing_state.raw()));
+        return keep(format!("idle_prompt while {}", existing_state.raw()));
     }
 
     // A subagent's own Stop routinely lands a second or two after the main thread's Stop.
@@ -409,7 +484,7 @@ pub fn resolve(
         && SUBAGENT_WIND_DOWN_EVENT_NAMES.contains(&input.hook_event_name());
 
     if result_is_final && is_subagent_winding_down {
-        return Resolution::Keep(format!(
+        return keep(format!(
             "subagent {} while {}",
             input.hook_event_name(),
             existing_state.raw()
@@ -420,7 +495,7 @@ pub fn resolve(
         if let Some(existing) = existing {
             // Subagents keep running while the main thread waits on the user; ignore their chatter.
             if input.is_subagent_event() {
-                return Resolution::Keep(format!(
+                return keep(format!(
                     "subagent {} while {}",
                     input.hook_event_name(),
                     existing.state.raw()
@@ -434,7 +509,7 @@ pub fn resolve(
                     (existing.pending_tool_use_id.as_deref(), input.tool_use_id())
                 {
                     if pending != finished {
-                        return Resolution::Keep(format!(
+                        return keep(format!(
                             "sibling tool {finished} finished while waiting on {pending}"
                         ));
                     }
@@ -452,6 +527,7 @@ pub fn resolve(
         tool_name: tool_name.map(str::to_string),
         updated_at_epoch_seconds: now_secs,
         pending_tool_use_id: None,
+        active_agents: agents,
     };
     if mapped_state.is_attention_needed() {
         // PermissionRequest / PreToolUse(AskUserQuestion) carry tool_use_id; a Notification
@@ -908,6 +984,7 @@ mod tests {
             tool_name: Some("Bash".into()),
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: pending.map(str::to_string),
+            active_agents: Vec::new(),
         }
     }
 
@@ -925,7 +1002,7 @@ mod tests {
             existing.last_event_name = "Stop".into();
             match resolve(Some(&existing), &idle_prompt, PetState::Idle, "", None, now_epoch_secs()) {
                 Resolution::Keep(reason) => assert!(reason.contains("idle_prompt"), "{reason}"),
-                Resolution::Write(_) => panic!("idle_prompt must not clear {state:?}"),
+                other => panic!("idle_prompt must not clear {state:?} (got {other:?})"),
             }
         }
         // A busy state is still cleared (interrupt cleanup).
@@ -969,10 +1046,17 @@ mod tests {
             "agent_id": "agent-123",
             "tool_use_id": "toolu_other"
         }));
-        assert_eq!(
-            resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()),
-            Resolution::Keep("subagent PostToolUse while waiting_approval".to_string())
-        );
+        // The event is still ignored — but it did tell us an agent is alive, so the roster
+        // is written while the prompt on screen stays exactly as it was.
+        match resolve(Some(&existing), &event, PetState::Thinking, "Thinking…", None, now_epoch_secs()) {
+            Resolution::RosterOnly(snapshot) => {
+                assert_eq!(snapshot.state, PetState::WaitingApproval);
+                assert_eq!(snapshot.message, existing.message);
+                assert_eq!(snapshot.pending_tool_use_id.as_deref(), Some("toolu_1"));
+                assert_eq!(snapshot.active_agents.len(), 1);
+            }
+            other => panic!("expected a roster-only write, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1117,6 +1201,142 @@ mod tests {
         ));
     }
 
+    /// Drives the real `resolve` rather than the helper: the first version of these tests
+    /// called `agents_after` directly and so never noticed that every `Keep` path skipped
+    /// the roster entirely — which is exactly where `SubagentStop` arrives.
+    fn roster_after(
+        existing: Option<&SessionSnapshot>,
+        event_name: &str,
+        agent_id: Option<&str>,
+        now: f64,
+    ) -> Vec<String> {
+        let mut object = json!({"hook_event_name": event_name, "session_id": "s1", "cwd": "/tmp"});
+        if let Some(agent_id) = agent_id {
+            object.as_object_mut().unwrap().insert("agent_id".into(), json!(agent_id));
+        }
+        let event = input(object);
+        let snapshot = match resolve(existing, &event, PetState::Thinking, "…", None, now) {
+            Resolution::Write(snapshot) | Resolution::RosterOnly(snapshot) => snapshot,
+            Resolution::Keep(reason) => {
+                // Nothing changed about who is working; the roster is whatever it was.
+                assert!(!reason.is_empty());
+                return existing.map(|e| e.active_agents.iter().map(|a| a.id.clone()).collect()).unwrap_or_default();
+            }
+        };
+        snapshot.active_agents.into_iter().map(|agent| agent.id).collect()
+    }
+
+    fn snapshot_with_agents(state: PetState, agents: &[(&str, f64)]) -> SessionSnapshot {
+        let mut snapshot = blocked_snapshot(state, None);
+        snapshot.active_agents = agents
+            .iter()
+            .map(|(id, seen)| ActiveAgent { id: id.to_string(), last_seen_epoch_seconds: *seen })
+            .collect();
+        snapshot
+    }
+
+    #[test]
+    fn roster_tracks_who_is_working() {
+        let now = 1_000.0;
+        assert_eq!(roster_after(None, "SubagentStart", Some("a1"), now), vec!["a1"]);
+
+        let one = snapshot_with_agents(PetState::Working, &[("a1", now)]);
+        assert_eq!(roster_after(Some(&one), "SubagentStart", Some("a2"), now), vec!["a1", "a2"]);
+        // An agent we never saw start still counts: its tool calls give it away.
+        assert_eq!(roster_after(Some(&one), "PreToolUse", Some("a9"), now), vec!["a1", "a9"]);
+        // Seeing the same one again does not double it.
+        assert_eq!(roster_after(Some(&one), "PostToolUse", Some("a1"), now), vec!["a1"]);
+        // Events with no agent leave the roster alone.
+        assert_eq!(roster_after(Some(&one), "PreToolUse", None, now), vec!["a1"]);
+
+        let two = snapshot_with_agents(PetState::Working, &[("a1", now), ("a2", now)]);
+        assert_eq!(roster_after(Some(&two), "SubagentStop", Some("a1"), now), vec!["a2"]);
+
+        // Turn boundaries retire everyone.
+        for event_name in ["UserPromptSubmit", "Stop", "StopFailure", "SessionStart"] {
+            assert!(
+                roster_after(Some(&two), event_name, None, now).is_empty(),
+                "{event_name} should clear the roster"
+            );
+        }
+    }
+
+    #[test]
+    fn roster_survives_the_paths_that_ignore_the_event() {
+        // A stop is sent once. Every one of these states drops the event itself, and the
+        // first version of this feature dropped the retirement with it — leaving a clone
+        // on screen for an agent that had already reported back.
+        let now = 2_000.0;
+        for state in [PetState::Done, PetState::Error, PetState::WaitingApproval, PetState::NeedsInput] {
+            let existing = snapshot_with_agents(state, &[("a1", now), ("a2", now)]);
+            let event = input(json!({
+                "hook_event_name": "SubagentStop",
+                "session_id": "s1",
+                "agent_id": "a1"
+            }));
+            match resolve(Some(&existing), &event, PetState::Thinking, "…", None, now) {
+                Resolution::RosterOnly(snapshot) => {
+                    assert_eq!(snapshot.state, state, "{state:?} must not be overwritten");
+                    assert_eq!(snapshot.message, existing.message, "the result text stays");
+                    assert_eq!(
+                        snapshot.updated_at_epoch_seconds, existing.updated_at_epoch_seconds,
+                        "a roster update must not restart the decay clock"
+                    );
+                    let ids: Vec<&str> = snapshot.active_agents.iter().map(|a| a.id.as_str()).collect();
+                    assert_eq!(ids, vec!["a2"], "the agent that stopped is gone");
+                }
+                other => panic!("{state:?}: expected a roster-only write, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn compaction_does_not_retire_agents_mid_turn() {
+        // SessionStart also fires after auto-compaction, with the agents still working.
+        let now = 3_000.0;
+        let two = snapshot_with_agents(PetState::Working, &[("a1", now), ("a2", now)]);
+        let compact = input(json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "s1",
+            "source": "compact"
+        }));
+        match resolve(Some(&two), &compact, PetState::Thinking, "…", None, now) {
+            Resolution::Write(snapshot) => assert_eq!(snapshot.active_agents.len(), 2),
+            other => panic!("expected a write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agents_nobody_has_heard_from_stop_counting() {
+        // The self-healing half: a stop that never arrives (dropped, raced, or never sent)
+        // expires instead of haunting the pet until the next prompt.
+        let now = 4_000.0;
+        let window = SessionSnapshot::AGENT_ALIVE_WINDOW_SECS;
+        let mixed = snapshot_with_agents(
+            PetState::Working,
+            &[("stale", now - window - 1.0), ("fresh", now - 1.0)],
+        );
+        assert_eq!(mixed.live_agent_count(now), 1, "only the fresh one counts");
+        assert_eq!(roster_after(Some(&mixed), "PreToolUse", Some("fresh"), now), vec!["fresh"]);
+    }
+
+    #[test]
+    fn the_roster_is_bounded_and_drops_the_stalest() {
+        let now = 5_000.0;
+        let mut agents: Vec<(String, f64)> = (0..SessionSnapshot::MAXIMUM_TRACKED_AGENTS)
+            .map(|index| (format!("a{index}"), now - index as f64))
+            .collect();
+        // a0 is the freshest, a7 the stalest.
+        let borrowed: Vec<(&str, f64)> = agents.iter().map(|(id, seen)| (id.as_str(), *seen)).collect();
+        let full = snapshot_with_agents(PetState::Working, &borrowed);
+        let after = roster_after(Some(&full), "SubagentStart", Some("newcomer"), now);
+        assert_eq!(after.len(), SessionSnapshot::MAXIMUM_TRACKED_AGENTS);
+        assert!(after.contains(&"newcomer".to_string()));
+        assert!(!after.contains(&"a7".to_string()), "the stalest is dropped, not the oldest-added");
+        assert!(after.contains(&"a0".to_string()), "the freshest survives");
+        agents.clear();
+    }
+
     #[test]
     fn resolve_keeps_a_finished_result_through_late_subagent_events() {
         // The real sequence from a live session: Stop at 20:30:48, SubagentStop at 20:30:50.
@@ -1135,6 +1355,9 @@ mod tests {
                     Resolution::Keep(reason) => {
                         assert_eq!(reason, format!("subagent {event_name} while {}", state.raw()))
                     }
+                    // A roster-only write is fine — it keeps the state and only records who
+                    // is working — but the result itself must not change.
+                    Resolution::RosterOnly(snapshot) => assert_eq!(snapshot.state, state),
                     Resolution::Write(_) => panic!("{event_name} must not un-finish {state:?}"),
                 }
             }
@@ -1160,7 +1383,7 @@ mod tests {
             }));
             match resolve(Some(&existing), &event, mapped, message, None, now_epoch_secs()) {
                 Resolution::Write(snapshot) => assert_eq!(snapshot.state, mapped),
-                Resolution::Keep(reason) => panic!("{event_name} is real work, not chatter ({reason})"),
+                other => panic!("{event_name} is real work, not chatter (got {other:?})"),
             }
         }
 
@@ -1172,10 +1395,12 @@ mod tests {
             "session_id": "s1",
             "agent_id": "agent-123"
         }));
-        assert!(matches!(
-            resolve(Some(&existing), &start, PetState::Working, "…", None, now_epoch_secs()),
-            Resolution::Keep(_)
-        ));
+        match resolve(Some(&existing), &start, PetState::Working, "…", None, now_epoch_secs()) {
+            // Roster recorded, prompt untouched: the red clock must survive a subagent.
+            Resolution::RosterOnly(snapshot) => assert_eq!(snapshot.state, PetState::WaitingApproval),
+            Resolution::Keep(_) => {}
+            Resolution::Write(_) => panic!("a subagent must not overwrite a prompt"),
+        }
     }
 
     #[test]

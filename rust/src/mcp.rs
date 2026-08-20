@@ -87,6 +87,7 @@ pub fn write_state(shared: &SharedServerState, state: PetState, message: &str, e
         tool_name: None,
         updated_at_epoch_seconds: now,
         pending_tool_use_id: None,
+        active_agents: Vec::new(),
     };
     match server.store.write(&snapshot) {
         Ok(()) => {

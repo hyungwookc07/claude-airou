@@ -74,6 +74,23 @@ fn process(input_data: &[u8], store: &StateStore, log_path: &Path) {
                 crate::model::now_epoch_secs(),
             );
             match resolution {
+                Resolution::RosterOnly(snapshot) => {
+                    let agent_count = snapshot.active_agents.len();
+                    match store.write(&snapshot) {
+                        Ok(()) => crate::logging::append(
+                            log_path,
+                            &format!(
+                                "{} {} roster ({agent_count} agent(s) working)",
+                                input.hook_event_name(),
+                                input.session_id()
+                            ),
+                        ),
+                        Err(error) => crate::logging::append(
+                            log_path,
+                            &format!("{} {} roster write failed: {error}", input.hook_event_name(), input.session_id()),
+                        ),
+                    }
+                }
                 Resolution::Keep(reason) => {
                     crate::logging::append(
                         log_path,
@@ -219,6 +236,7 @@ mod tests {
             tool_name: Some("Bash".into()),
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: Some("toolu_pending".into()),
+            active_agents: Vec::new(),
         };
         fixture.store.write(&blocked).unwrap();
         process(

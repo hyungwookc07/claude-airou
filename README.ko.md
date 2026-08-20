@@ -91,6 +91,8 @@ Claude Code ──hook 이벤트(stdin JSON)──▶ claude-airou hook ──�
 
 세션이 생각하거나 작업하는 동안에는 펫 뒤에 은은한 후광이 뜬다. 크기와 밝기는 그 세션의 **추론 effort**를 따라간다 — `low`의 옅은 테두리에서 `max`의 넓은 빛까지, 시스템 강조 색상으로. 세션이 끝나거나 사용자를 기다리기 시작하면 사라진다. effort 값은 트랜스크립트에서 읽으므로(상태줄을 설치했다면 거기서도 온다) 데스크톱 앱을 포함해 펫이 도는 모든 곳에서 동작한다. 메뉴바 🐾 메뉴에 **Hide effort aura** 스위치가 있다.
 
+서브에이전트가 일하는 동안에는 그 수만큼 **그림자 분신**이 펫 뒤에 선다 — 같은 스프라이트를 한 단계 작게, 단색으로 눌러 그린다. 최대 3개까지. 해당 세션이 바쁠 때만 나타나고 턴이 끝나면 사라지므로, 분신이 서 있다는 건 지금 기다리는 답이 아니라 백그라운드에서 일이 돌고 있다는 뜻이다. 메뉴바 🐾 메뉴에 **Hide agent shadows** 스위치가 있다.
+
 hook 항목 자체는 설치된 Claude Code가 2.1.139 이상이면 **exec 형식**(`command` + `args`, 셸 없이 직접 실행)으로, 그 미만이면 셸 형식으로 기록된다. `claude-airou install-hooks --hook-format exec|shell`로 직접 고를 수도 있다. exec 형식은 인용부호 문제를 아예 없애는데, 윈도우에서 중요하다 — Git Bash가 없으면 hook이 PowerShell로 실행되고, PowerShell은 작은따옴표로 감싼 경로를 호출 연산자 없이 실행하지 못한다.
 
 hook 바이너리는 stdout에 아무것도 쓰지 않고 항상 exit 0 으로 끝난다 (Claude Code는 일부 이벤트의 hook stdout을 모델 컨텍스트에 넣기 때문). 무슨 일이 있었는지는 `~/.claude-airou/hook.log`에 남는다.

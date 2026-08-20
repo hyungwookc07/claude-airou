@@ -93,6 +93,8 @@ Claude Code ──hook event (JSON on stdin)──▶ claude-airou hook ──�
 
 While a session is thinking or working the pet also shows a soft halo behind itself, sized and brightened by the session's **reasoning effort** — from a faint ring at `low` up to a wide glow at `max`, in your system accent colour, and gone the moment the session finishes or starts waiting on you. The level comes from the transcript (the status line supplies it too when installed), so it works everywhere the pet does, including the desktop app. The menu bar 🐾 menu has a **Hide effort aura** switch.
 
+When subagents are working for a session, each one stands behind the pet as a **shadow clone** — the same sprite, a size smaller, flattened to one tone — up to three. They appear only while that session is busy and vanish with the turn, so a row of them means work is happening in the background rather than in the answer you are waiting for. The menu bar 🐾 menu has a **Hide agent shadows** switch.
+
 The hook entry itself is written in **exec form** (`command` + `args`, spawned without a shell) when the installed Claude Code is 2.1.139 or newer, and in shell form otherwise — `claude-airou install-hooks --hook-format exec|shell` overrides the choice. Exec form removes quoting from the picture entirely, which matters on Windows: there hooks run through PowerShell when Git Bash is absent, and PowerShell does not execute a single-quoted path without the call operator.
 
 The hook binary never writes to stdout and always exits 0 (Claude Code feeds some events' hook stdout back into the model context). What it saw is logged to `~/.claude-airou/hook.log` (auto-truncated).

@@ -37,6 +37,8 @@ pub struct MenuModel {
     pub pet_hidden: bool,
     /// Whether the effort aura behind the pet is switched off.
     pub effort_aura_hidden: bool,
+    /// Whether the shadow clone per working subagent is switched off.
+    pub agent_shadows_hidden: bool,
     /// Whether the login item is registered (setup leaves it off by default).
     pub start_at_login: bool,
 }
@@ -70,6 +72,7 @@ pub enum MenuAction {
     ToggleAlwaysExpanded,
     ToggleBubbles,
     ToggleEffortAura,
+    ToggleAgentShadows,
     ToggleClickThrough,
     TogglePetHidden,
     ReloadPets,
@@ -124,6 +127,7 @@ pub fn menu_id_for(action: &MenuAction) -> String {
         MenuAction::SelectGauge(metric) => format!("gauge:{}", gauge_raw(*metric)),
         MenuAction::InstallStatusLine => "install-statusline".to_string(),
         MenuAction::ToggleEffortAura => "toggle-effort-aura".to_string(),
+        MenuAction::ToggleAgentShadows => "toggle-agent-shadows".to_string(),
         MenuAction::ToggleAlwaysExpanded => "toggle:always-expanded".to_string(),
         MenuAction::ToggleBubbles => "toggle:bubbles".to_string(),
         MenuAction::ToggleClickThrough => "toggle:click-through".to_string(),
@@ -156,6 +160,7 @@ pub fn action_for_menu_id(id: &str) -> Option<MenuAction> {
         "sessions:automatic" => Some(MenuAction::FollowSessionsAutomatically),
         "install-statusline" => Some(MenuAction::InstallStatusLine),
         "toggle-effort-aura" => Some(MenuAction::ToggleEffortAura),
+        "toggle-agent-shadows" => Some(MenuAction::ToggleAgentShadows),
         "toggle:always-expanded" => Some(MenuAction::ToggleAlwaysExpanded),
         "toggle:bubbles" => Some(MenuAction::ToggleBubbles),
         "toggle:click-through" => Some(MenuAction::ToggleClickThrough),
@@ -316,6 +321,14 @@ pub fn build_menu(model: &MenuModel) -> Menu {
         None,
     );
     let _ = menu.append(&aura);
+    let shadows = CheckMenuItem::with_id(
+        menu_id_for(&MenuAction::ToggleAgentShadows),
+        "Hide agent shadows",
+        true,
+        model.agent_shadows_hidden,
+        None,
+    );
+    let _ = menu.append(&shadows);
     let click_through = CheckMenuItem::with_id(
         menu_id_for(&MenuAction::ToggleClickThrough),
         "Click-through (ignore mouse)",
@@ -436,6 +449,7 @@ mod tests {
             MenuAction::SelectGauge(GaugeMetric::Off),
             MenuAction::ToggleBubbles,
             MenuAction::ToggleEffortAura,
+            MenuAction::ToggleAgentShadows,
             MenuAction::ToggleClickThrough,
             MenuAction::TogglePetHidden,
             MenuAction::ReloadPets,
