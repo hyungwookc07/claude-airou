@@ -479,6 +479,10 @@ fn status_lines(store: &StateStore) -> Vec<String> {
                 if let Some(seven) = usage.seven_day_used_percentage {
                     parts.push(format!("7d {}%", seven.round() as i64));
                 }
+                if let Some(effort) = usage.effort_level {
+                    // Also what drives the aura behind the pet, so `status` is how you check it.
+                    parts.push(format!("effort {}", effort.raw()));
+                }
                 parts.push(usage.source.raw().to_string());
                 usage_text = format!("\t[{}]", parts.join(" "));
             }
@@ -1009,6 +1013,7 @@ mod tests {
         SessionUsageSnapshot {
             session_id: id.to_string(),
             source,
+            effort_level: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             context_used_percentage: None,
             context_window_size: None,
