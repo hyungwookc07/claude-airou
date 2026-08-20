@@ -337,7 +337,7 @@ impl OverlayModel {
     /// How many shadow clones to draw behind a card's pet: one per subagent working for
     /// that session, and only while it is actually busy — a finished session has no
     /// helpers to show, whatever the roster still says.
-    pub fn agent_shadow_count_for_card(&self, card: &RowCard, is_hidden: bool) -> usize {
+    pub fn agent_shadow_count_for_card(&self, card: &RowCard, is_hidden: bool, now_secs: f64) -> usize {
         if is_hidden {
             return 0;
         }
@@ -345,7 +345,7 @@ impl OverlayModel {
             return 0;
         }
         self.session_with_id(card.session_id.as_deref())
-            .map(|session| session.active_agent_ids.len().min(MAXIMUM_DRAWN_AGENT_SHADOWS))
+            .map(|session| session.live_agent_count(now_secs).min(MAXIMUM_DRAWN_AGENT_SHADOWS))
             .unwrap_or(0)
     }
 
@@ -631,7 +631,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs() - age_secs,
             pending_tool_use_id: None,
-            active_agent_ids: Vec::new(),
+            active_agents: Vec::new(),
         }
     }
 

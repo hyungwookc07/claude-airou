@@ -146,17 +146,43 @@ pub struct SessionSnapshot {
     /// While waiting on the user for a specific tool call, the id of that call.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pending_tool_use_id: Option<String>,
-    /// Subagents currently working for this session, newest last. The overlay draws one
-    /// shadow clone behind the pet per entry. Kept short (`MAXIMUM_TRACKED_AGENTS`): the
-    /// pet only shows a handful, and an id we never see finish would otherwise linger.
+    /// Subagents working for this session, each with the last time we heard from it. The
+    /// overlay draws one shadow clone per agent still inside `AGENT_ALIVE_WINDOW_SECS`.
+    ///
+    /// Timestamps rather than a plain list because the retire signal is unreliable: a
+    /// `SubagentStop` can be dropped by the merge policy, lost to a race between two hook
+    /// processes writing the same file, or never sent at all. An id nobody has heard from
+    /// in a while simply stops counting, so every one of those leaks heals itself.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub active_agent_ids: Vec<String>,
+    pub active_agents: Vec<ActiveAgent>,
+}
+
+/// One subagent working for a session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveAgent {
+    pub id: String,
+    pub last_seen_epoch_seconds: f64,
 }
 
 impl SessionSnapshot {
-    /// More than this many concurrent agents changes nothing on screen, so the tail is
-    /// dropped rather than grown without bound.
+    /// More than this many concurrent agents changes nothing on screen, so the stalest is
+    /// dropped rather than the list grown without bound.
     pub const MAXIMUM_TRACKED_AGENTS: usize = 8;
+
+    /// An agent nobody has heard from for this long is treated as finished. Agents that are
+    /// genuinely working emit events far more often than this (every tool call), so the
+    /// window only ever expires the ones whose stop went missing.
+    pub const AGENT_ALIVE_WINDOW_SECS: f64 = 90.0;
+
+    /// Agents still counting as alive at `now`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // overlay-only
+    pub fn live_agent_count(&self, now_secs: f64) -> usize {
+        self.active_agents
+            .iter()
+            .filter(|agent| now_secs - agent.last_seen_epoch_seconds <= Self::AGENT_ALIVE_WINDOW_SECS)
+            .count()
+    }
 
     pub fn project_name(&self) -> String {
         let name = std::path::Path::new(&self.cwd)
@@ -691,7 +717,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs() - 10.0,
             pending_tool_use_id: None,
-            active_agent_ids: Vec::new(),
+            active_agents: Vec::new(),
         };
         assert_eq!(snapshot.effective_state(), PetState::Idle);
     }
@@ -708,7 +734,7 @@ mod tests {
                 tool_name: None,
                 updated_at_epoch_seconds: now_epoch_secs() - 3.0 * 60.0 * 60.0,
                 pending_tool_use_id: None,
-                active_agent_ids: Vec::new(),
+                active_agents: Vec::new(),
             };
             assert_eq!(snapshot.effective_state(), state, "{state:?} must not decay");
         }
@@ -725,7 +751,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: None,
-            active_agent_ids: Vec::new(),
+            active_agents: Vec::new(),
         };
         // Fresh resume: the wave is still showing.
         assert!(!snapshot.is_opened_without_activity());

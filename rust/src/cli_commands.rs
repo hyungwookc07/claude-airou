@@ -90,7 +90,7 @@ fn run_simulate_impl(positional: &[String], parsed: &Parsed, sleep: &dyn Fn(f64)
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs(),
             pending_tool_use_id: None,
-            active_agent_ids: Vec::new(),
+            active_agents: Vec::new(),
         };
         match store.write(&snapshot) {
             Ok(()) => println!("{}: {message}", state.raw()),
@@ -1007,7 +1007,7 @@ mod tests {
             tool_name: None,
             updated_at_epoch_seconds: now_epoch_secs() - age,
             pending_tool_use_id: None,
-            active_agent_ids: Vec::new(),
+            active_agents: Vec::new(),
         }
     }
 

@@ -942,12 +942,15 @@ impl App {
         // From the bottom: label slot (22), spacing, gauge pill (12), spacing, sprite.
         let label_center_y = bottom - SESSION_BADGE_RESERVED_HEIGHT / 2.0;
         let mut sprite_bottom = bottom - SESSION_BADGE_RESERVED_HEIGHT - CARD_VERTICAL_SPACING;
-        if layout.shows_gauge {
+        // Geometry now, paint later: the shadow clones hang below the sprite baseline, so
+        // the pill has to go on top of them rather than under.
+        let gauge_center_y = if layout.shows_gauge {
             let gauge_slot_top = sprite_bottom - GAUGE_SLOT_HEIGHT;
-            let value = self.model.gauge_value_for_card(card, self.config.gauge_metric);
-            self.paint_gauge(&mut card_canvas, center_x, gauge_slot_top + GAUGE_SLOT_HEIGHT / 2.0, value, !card.is_primary);
             sprite_bottom = gauge_slot_top - CARD_VERTICAL_SPACING;
-        }
+            Some(gauge_slot_top + GAUGE_SLOT_HEIGHT / 2.0)
+        } else {
+            None
+        };
 
         // Sprite (primary: hop / shake offsets and the floating heart).
         let sprite_pixel_scale = self.sprite_pixel_scale(card.pixel_scale);
@@ -1014,7 +1017,7 @@ impl App {
                 // shadow rather than a second creature.
                 let shadow_count = self
                     .model
-                    .agent_shadow_count_for_card(card, self.config.is_agent_shadows_hidden);
+                    .agent_shadow_count_for_card(card, self.config.is_agent_shadows_hidden, now);
                 if shadow_count > 0 {
                     // One pixel-scale smaller, so a clone reads as standing behind the pet
                     // rather than as a second pet that happens to be grey.
@@ -1025,20 +1028,29 @@ impl App {
                         let half_height = sprite_height_points / 2.0;
                         let sprite_center_x = sprite_left as f32 + image_width as f32 / 2.0;
                         let sprite_center_y = sprite_top as f32 + image_height as f32 / 2.0;
+                        // Flattened once: the clones differ only in where they stand and how
+                        // faint they are, and re-flattening per clone was the bulk of the cost.
+                        let shadow = flattened_rgba(&shadow_rgba, self.theme.agent_shadow, 1.0);
+                        // A hand-edited pixelScale can outgrow the reserved margin, and the
+                        // clone is then the thing that gets clipped; hold it inside instead.
+                        let furthest_left = (canvas_width_points * scale - shadow_width as f32).max(0.0);
+                        let furthest_top = (canvas_height_points * scale - shadow_height as f32).max(0.0);
                         for (offset_x, offset_y, opacity) in
                             AGENT_SHADOW_PLACEMENTS.iter().take(shadow_count)
                         {
-                            let shadow = flattened_rgba(&shadow_rgba, self.theme.agent_shadow, *opacity);
-                            let left = sprite_center_x + offset_x * half_height * scale
-                                - shadow_width as f32 / 2.0;
-                            let top = sprite_center_y + offset_y * half_height * scale
-                                - shadow_height as f32 / 2.0;
-                            card_canvas.blit_rgba(
+                            let left = (sprite_center_x + offset_x * half_height * scale
+                                - shadow_width as f32 / 2.0)
+                                .clamp(0.0, furthest_left);
+                            let top = (sprite_center_y + offset_y * half_height * scale
+                                - shadow_height as f32 / 2.0)
+                                .clamp(0.0, furthest_top);
+                            card_canvas.blit_rgba_with_opacity(
                                 &shadow,
                                 shadow_width,
                                 shadow_height,
                                 left.round() as i32,
                                 top.round() as i32,
+                                *opacity,
                             );
                         }
                     }
@@ -1046,6 +1058,11 @@ impl App {
                 card_canvas.blit_rgba(&rgba, image_width, image_height, sprite_left, sprite_top);
             }
         }
+        if let Some(gauge_center_y) = gauge_center_y {
+            let value = self.model.gauge_value_for_card(card, self.config.gauge_metric);
+            self.paint_gauge(&mut card_canvas, center_x, gauge_center_y, value, !card.is_primary);
+        }
+
         if card.is_primary {
             if let Some(started_at) = self.model.pet_reaction_started_at_secs {
                 if let Some((rise, opacity)) = animation::floating_heart((now - started_at) as f32) {
