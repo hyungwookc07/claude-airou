@@ -1,6 +1,6 @@
 [package]
 name = "claude-airou"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 description = "claude-airou — a desktop pet for Claude Code (macOS overlay, hook, status line, MCP server)."
 license = "MIT"
