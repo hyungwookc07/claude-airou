@@ -29,6 +29,13 @@ pub const SUBSCRIBED_EVENT_NAMES: [&str; 17] = [
     "ElicitationResult",
 ];
 
+/// Subagent events that mean "an agent finished a piece of work". They routinely trail
+/// the main thread's own Stop, so a session already showing a result ignores them; the
+/// starting half (`SubagentStart`, an agent's `PreToolUse`) is real activity and is not
+/// listed here.
+const SUBAGENT_WIND_DOWN_EVENT_NAMES: [&str; 4] =
+    ["SubagentStop", "PostToolUse", "PostToolUseFailure", "PostToolBatch"];
+
 /// The subset of the hook stdin JSON the pet cares about (accessors over the raw object,
 /// like Swift's `HookInput`).
 pub struct HookInput {
@@ -391,11 +398,25 @@ pub fn resolve(
     // A subagent's own Stop routinely lands a second or two after the main thread's Stop.
     // Taking it at face value un-finishes a session that is done: the pet drops the check
     // mark back to thinking and sits there until the busy state decays, while Claude Code
-    // rightly shows the session as finished. Real new work always announces itself with a
-    // non-subagent event (UserPromptSubmit, PreToolUse), so nothing is lost by ignoring it.
+    // rightly shows the session as finished.
+    //
+    // Only the winding-down half of subagent traffic is chatter, though. An agent that
+    // *starts* something after the turn ended is real work — background workflows run
+    // exactly like that — and ignoring it left the pet showing done while a dozen agents
+    // were grinding away.
     let result_is_final = matches!(existing_state, PetState::Done | PetState::Error);
+    let is_subagent_winding_down = input.is_subagent_event()
+        && SUBAGENT_WIND_DOWN_EVENT_NAMES.contains(&input.hook_event_name());
 
-    if user_is_blocked || result_is_final {
+    if result_is_final && is_subagent_winding_down {
+        return Resolution::Keep(format!(
+            "subagent {} while {}",
+            input.hook_event_name(),
+            existing_state.raw()
+        ));
+    }
+
+    if user_is_blocked {
         if let Some(existing) = existing {
             // Subagents keep running while the main thread waits on the user; ignore their chatter.
             if input.is_subagent_event() {
@@ -1101,7 +1122,7 @@ mod tests {
         // The real sequence from a live session: Stop at 20:30:48, SubagentStop at 20:30:50.
         // Before this rule the trailing event turned a finished session back into thinking,
         // where it sat until the busy state decayed 15 minutes later.
-        for event_name in ["SubagentStop", "SubagentStart", "PostToolUse"] {
+        for event_name in ["SubagentStop", "PostToolUse", "PostToolBatch", "PostToolUseFailure"] {
             for state in [PetState::Done, PetState::Error] {
                 let mut existing = blocked_snapshot(state, None);
                 existing.last_event_name = "Stop".into();
@@ -1118,6 +1139,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn resolve_lets_a_subagent_that_starts_working_revive_a_finished_result() {
+        // Background workflows keep agents running after the turn ends. Their traffic is
+        // the only signal that anything is happening, so treating it as trailing chatter
+        // left the pet showing done through minutes of real work.
+        for (event_name, mapped, message) in [
+            ("SubagentStart", PetState::Working, "Sent a reviewer agent to work"),
+            ("PreToolUse", PetState::Working, "Running: cargo test"),
+        ] {
+            let mut existing = blocked_snapshot(PetState::Done, None);
+            existing.last_event_name = "Stop".into();
+            let event = input(json!({
+                "hook_event_name": event_name,
+                "session_id": "s1",
+                "agent_id": "agent-123",
+                "tool_name": "Bash"
+            }));
+            match resolve(Some(&existing), &event, mapped, message, None, now_epoch_secs()) {
+                Resolution::Write(snapshot) => assert_eq!(snapshot.state, mapped),
+                Resolution::Keep(reason) => panic!("{event_name} is real work, not chatter ({reason})"),
+            }
+        }
+
+        // While the user is being asked something, though, nothing from a subagent may
+        // overwrite the prompt — that guard is unchanged.
+        let existing = blocked_snapshot(PetState::WaitingApproval, None);
+        let start = input(json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "s1",
+            "agent_id": "agent-123"
+        }));
+        assert!(matches!(
+            resolve(Some(&existing), &start, PetState::Working, "…", None, now_epoch_secs()),
+            Resolution::Keep(_)
+        ));
     }
 
     #[test]
