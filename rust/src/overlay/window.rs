@@ -854,7 +854,10 @@ impl App {
             let canvas_height_points = card_canvas.height as f32 / scale;
             let center_x = card.center_x() + offset_x;
             let destination_left = center_x - canvas_width_points * motion_scale / 2.0;
-            let destination_top = cards_bottom - canvas_height_points * motion_scale;
+            // The canvas carries `aura_margin` of empty room under the card content; align
+            // the content, not the canvas, or every card would float upwards.
+            let destination_top =
+                cards_bottom - (canvas_height_points - layout.aura_margin) * motion_scale;
             canvas.blit_canvas(
                 &card_canvas,
                 (destination_left * scale).round(),
@@ -893,15 +896,20 @@ impl App {
     /// overflow up to 200 pt) and taller (room for the hop and the heart above the sprite).
     fn paint_card(&mut self, card: &RowCard, layout: &RowLayout, now: f64) -> Canvas {
         let scale = self.scale_factor();
-        let canvas_width_points = card.width.max(SESSION_LABEL_MAX_WIDTH + 8.0);
+        // The aura margin is buffer on every side, including below the label: the canvas is
+        // centred on the card horizontally and `paint` aligns the card content (not the
+        // canvas) to the row's baseline, so the bottom margin is real room, not a shift.
+        let aura_margin = layout.aura_margin;
+        let canvas_width_points = card.width.max(SESSION_LABEL_MAX_WIDTH + 8.0) + aura_margin * 2.0;
         let card_height = layout.card_height();
-        let canvas_height_points = CARD_CANVAS_TOP_MARGIN + card_height;
+        let canvas_height_points =
+            CARD_CANVAS_TOP_MARGIN + aura_margin + card_height + aura_margin;
         let mut card_canvas = Canvas::new(
             (canvas_width_points * scale).round() as u32,
             (canvas_height_points * scale).round() as u32,
         );
         let center_x = canvas_width_points / 2.0;
-        let bottom = canvas_height_points;
+        let bottom = canvas_height_points - aura_margin;
         let state = self.model.state_for_card(card);
 
         // From the bottom: label slot (22), spacing, gauge pill (12), spacing, sprite.
@@ -937,17 +945,33 @@ impl App {
         let sprite_top = ((sprite_bottom - sprite_height_points + sprite_offset_y) * scale).round() as i32;
         // Aura first, so the sprite sits on top of its own glow.
         if let Some(effort) = self.model.effort_aura_for_card(card, self.config.is_effort_aura_hidden) {
-            let (radius_scale, opacity) = effort.aura_radius_and_opacity();
+            let (inner_scale, band_fraction, opacity) = effort.aura_inner_scale_band_and_opacity();
             let sprite_center_x = center_x + sprite_offset_x;
             let sprite_center_y = sprite_bottom - sprite_height_points / 2.0 + sprite_offset_y;
-            // The flat core reaches roughly the sprite's own edge; the band beyond it is
-            // what the user actually sees, and that is what effort grows.
             let half_height = sprite_height_points / 2.0;
+            // Whatever the reserve works out to, never draw past the edge of the canvas or
+            // of the panel it lands in: a glow cut mid-slope is a hard line across the pet,
+            // and at Large the radius outgrows any fixed margin.
+            let card_left_in_panel = card.center_x() - canvas_width_points / 2.0 + aura_margin;
+            let room = [
+                sprite_center_x,
+                canvas_width_points - sprite_center_x,
+                sprite_center_y,
+                canvas_height_points - sprite_center_y,
+                card.center_x() + (sprite_center_x - center_x),
+                layout.content_width - card_left_in_panel - (sprite_center_x - aura_margin),
+            ]
+            .into_iter()
+            .fold(f32::INFINITY, f32::min)
+            .max(0.0);
+            // Spend a share of the room beyond the sprite: never a cut, always a step.
+            let outer_radius = half_height + (room - half_height).max(0.0) * band_fraction;
+            let inner_radius = (half_height * inner_scale).min(outer_radius * 0.85);
             card_canvas.fill_radial_glow(
                 sprite_center_x * scale,
                 sprite_center_y * scale,
-                half_height * 0.72 * scale,
-                half_height * radius_scale * scale,
+                inner_radius * scale,
+                outer_radius * scale,
                 self.theme.accent.with_opacity(if card.is_primary { opacity } else { opacity * 0.6 }),
             );
         }
