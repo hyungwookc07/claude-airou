@@ -192,204 +192,316 @@ pub fn nearest_size_option(pixel_scale: f64) -> f64 {
         .unwrap_or(5.0)
 }
 
-/// Builds the whole tray menu from a `MenuModel` (Swift `populateMenu` order). Any muda
-/// error degrades to a menu with whatever items made it in (never panics on the tick path).
-pub fn build_menu(model: &MenuModel) -> Menu {
-    let menu = Menu::new();
+/// The live tray menu: the muda handle for every item whose text or check mark can
+/// change, so ticks refresh them in place. Replacing the whole menu (`set_menu`) while
+/// the user has it open detaches the open copy — the rows stay visible but every click
+/// goes dead — and the header/usage text changes on almost every tick while a session is
+/// busy, so "replace on any change" had the menu broken more often than not.
+pub struct TrayMenu {
+    pub menu: Menu,
+    header: MenuItem,
+    usage: Option<MenuItem>,
+    automatic: Option<CheckMenuItem>,
+    session_rows: Vec<CheckMenuItem>,
+    gauge_items: Vec<(GaugeMetric, CheckMenuItem)>,
+    expand: CheckMenuItem,
+    pet_items: Vec<CheckMenuItem>,
+    size_items: Vec<(f64, CheckMenuItem)>,
+    bubbles: CheckMenuItem,
+    aura: CheckMenuItem,
+    shadows: CheckMenuItem,
+    click_through: CheckMenuItem,
+    hide_pet: MenuItem,
+    start_at_login: CheckMenuItem,
+}
 
-    let header = MenuItem::with_id("header", &model.header, false, None);
-    let _ = menu.append(&header);
-    if let Some(usage_line) = &model.usage_line {
-        let usage = MenuItem::with_id("usage", usage_line, false, None);
-        let _ = menu.append(&usage);
-    }
+/// True when `next` differs from `previous` only in texts and check marks — everything
+/// `TrayMenu::apply` changes in place. Rows appearing or disappearing (sessions, pets,
+/// the usage line) still need a rebuild.
+pub fn same_menu_structure(previous: &MenuModel, next: &MenuModel) -> bool {
+    previous.usage_line.is_some() == next.usage_line.is_some()
+        && previous.sessions.len() == next.sessions.len()
+        && previous
+            .sessions
+            .iter()
+            .zip(&next.sessions)
+            .all(|(a, b)| a.session_id == b.session_id)
+        && previous.pets.len() == next.pets.len()
+        && previous
+            .pets
+            .iter()
+            .zip(&next.pets)
+            .all(|(a, b)| a.0 == b.0 && a.1 == b.1)
+}
 
-    // Sessions submenu: Automatic + one pin entry per session.
-    if !model.sessions.is_empty() {
-        let sessions_menu = Submenu::new(format!("Sessions ({})", model.sessions.len()), true);
-        let automatic = CheckMenuItem::with_id(
-            menu_id_for(&MenuAction::FollowSessionsAutomatically),
-            "Automatic (approval > busy > recent)",
-            true,
-            model.is_following_automatically,
-            None,
-        );
-        let _ = sessions_menu.append(&automatic);
-        let _ = sessions_menu.append(&PredefinedMenuItem::separator());
-        for row in &model.sessions {
-            let item = CheckMenuItem::with_id(
-                menu_id_for(&MenuAction::PinSession(row.session_id.clone())),
-                &row.title,
+impl TrayMenu {
+    /// Builds the whole tray menu from a `MenuModel` (Swift `populateMenu` order),
+    /// keeping the handles for `apply`. Any muda error degrades to a menu with whatever
+    /// items made it in (never panics on the tick path).
+    pub fn build(model: &MenuModel) -> TrayMenu {
+        let menu = Menu::new();
+
+        let header = MenuItem::with_id("header", &model.header, false, None);
+        let _ = menu.append(&header);
+        let usage = model.usage_line.as_ref().map(|usage_line| {
+            let item = MenuItem::with_id("usage", usage_line, false, None);
+            let _ = menu.append(&item);
+            item
+        });
+
+        // Sessions submenu: Automatic + one pin entry per session.
+        let mut automatic = None;
+        let mut session_rows = Vec::with_capacity(model.sessions.len());
+        if !model.sessions.is_empty() {
+            let sessions_menu = Submenu::new(format!("Sessions ({})", model.sessions.len()), true);
+            let automatic_item = CheckMenuItem::with_id(
+                menu_id_for(&MenuAction::FollowSessionsAutomatically),
+                "Automatic (approval > busy > recent)",
                 true,
-                row.is_pinned,
+                model.is_following_automatically,
                 None,
             );
-            let _ = sessions_menu.append(&item);
+            let _ = sessions_menu.append(&automatic_item);
+            automatic = Some(automatic_item);
+            let _ = sessions_menu.append(&PredefinedMenuItem::separator());
+            for row in &model.sessions {
+                let item = CheckMenuItem::with_id(
+                    menu_id_for(&MenuAction::PinSession(row.session_id.clone())),
+                    &row.title,
+                    true,
+                    row.is_pinned,
+                    None,
+                );
+                let _ = sessions_menu.append(&item);
+                session_rows.push(item);
+            }
+            let _ = menu.append(&sessions_menu);
         }
-        let _ = menu.append(&sessions_menu);
-    }
 
-    // Gauge submenu (+ status line installer).
-    let gauge_menu = Submenu::new("Gauge", true);
-    for metric in GAUGE_OPTIONS {
-        let item = CheckMenuItem::with_id(
-            menu_id_for(&MenuAction::SelectGauge(metric)),
-            gauge_menu_title(metric),
+        // Gauge submenu (+ status line installer).
+        let gauge_menu = Submenu::new("Gauge", true);
+        let mut gauge_items = Vec::with_capacity(GAUGE_OPTIONS.len());
+        for metric in GAUGE_OPTIONS {
+            let item = CheckMenuItem::with_id(
+                menu_id_for(&MenuAction::SelectGauge(metric)),
+                gauge_menu_title(metric),
+                true,
+                metric == model.gauge_metric,
+                None,
+            );
+            let _ = gauge_menu.append(&item);
+            gauge_items.push((metric, item));
+        }
+        let _ = gauge_menu.append(&PredefinedMenuItem::separator());
+        let _ = gauge_menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::InstallStatusLine),
+            "Feed from Claude Code status line…",
             true,
-            metric == model.gauge_metric,
+            None,
+        ));
+        let _ = menu.append(&gauge_menu);
+
+        let expand = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleAlwaysExpanded),
+            "Show all sessions side by side",
+            true,
+            model.always_expanded,
             None,
         );
-        let _ = gauge_menu.append(&item);
-    }
-    let _ = gauge_menu.append(&PredefinedMenuItem::separator());
-    let _ = gauge_menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::InstallStatusLine),
-        "Feed from Claude Code status line…",
-        true,
-        None,
-    ));
-    let _ = menu.append(&gauge_menu);
+        let _ = menu.append(&expand);
 
-    let expand = CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleAlwaysExpanded),
-        "Show all sessions side by side",
-        true,
-        model.always_expanded,
-        None,
-    );
-    let _ = menu.append(&expand);
+        let _ = menu.append(&PredefinedMenuItem::separator());
 
-    let _ = menu.append(&PredefinedMenuItem::separator());
-
-    // Pet submenu.
-    let pet_menu = Submenu::new("Pet", true);
-    for (pet_id, title, selected) in &model.pets {
-        let item = CheckMenuItem::with_id(
-            menu_id_for(&MenuAction::SelectPet(pet_id.clone())),
-            title,
+        // Pet submenu.
+        let pet_menu = Submenu::new("Pet", true);
+        let mut pet_items = Vec::with_capacity(model.pets.len());
+        for (pet_id, title, selected) in &model.pets {
+            let item = CheckMenuItem::with_id(
+                menu_id_for(&MenuAction::SelectPet(pet_id.clone())),
+                title,
+                true,
+                *selected,
+                None,
+            );
+            let _ = pet_menu.append(&item);
+            pet_items.push(item);
+        }
+        let _ = pet_menu.append(&PredefinedMenuItem::separator());
+        let _ = pet_menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::ReloadPets),
+            "Reload pets",
             true,
-            *selected,
+            None,
+        ));
+        let _ = pet_menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::OpenPetsFolder),
+            "Open pets folder…",
+            true,
+            None,
+        ));
+        let _ = menu.append(&pet_menu);
+
+        // Size submenu.
+        let size_menu = Submenu::new("Size", true);
+        let nearest = nearest_size_option(model.pixel_scale);
+        let mut size_items = Vec::with_capacity(SIZE_OPTIONS.len());
+        for (label, scale) in SIZE_OPTIONS {
+            let item = CheckMenuItem::with_id(
+                menu_id_for(&MenuAction::SelectSize(scale)),
+                label,
+                true,
+                scale == nearest,
+                None,
+            );
+            let _ = size_menu.append(&item);
+            size_items.push((scale, item));
+        }
+        let _ = menu.append(&size_menu);
+
+        let _ = menu.append(&PredefinedMenuItem::separator());
+
+        let bubbles = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleBubbles),
+            "Hide speech bubbles",
+            true,
+            model.bubbles_hidden,
             None,
         );
-        let _ = pet_menu.append(&item);
-    }
-    let _ = pet_menu.append(&PredefinedMenuItem::separator());
-    let _ = pet_menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::ReloadPets),
-        "Reload pets",
-        true,
-        None,
-    ));
-    let _ = pet_menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::OpenPetsFolder),
-        "Open pets folder…",
-        true,
-        None,
-    ));
-    let _ = menu.append(&pet_menu);
-
-    // Size submenu.
-    let size_menu = Submenu::new("Size", true);
-    let nearest = nearest_size_option(model.pixel_scale);
-    for (label, scale) in SIZE_OPTIONS {
-        let item = CheckMenuItem::with_id(
-            menu_id_for(&MenuAction::SelectSize(scale)),
-            label,
+        let _ = menu.append(&bubbles);
+        let aura = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleEffortAura),
+            "Hide effort aura",
             true,
-            scale == nearest,
+            model.effort_aura_hidden,
             None,
         );
-        let _ = size_menu.append(&item);
+        let _ = menu.append(&aura);
+        let shadows = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleAgentShadows),
+            "Hide agent shadows",
+            true,
+            model.agent_shadows_hidden,
+            None,
+        );
+        let _ = menu.append(&shadows);
+        let click_through = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleClickThrough),
+            "Click-through (ignore mouse)",
+            true,
+            model.click_through,
+            None,
+        );
+        let _ = menu.append(&click_through);
+        let hide_pet = MenuItem::with_id(
+            menu_id_for(&MenuAction::TogglePetHidden),
+            if model.pet_hidden { "Show pet" } else { "Hide pet" },
+            true,
+            None,
+        );
+        let _ = menu.append(&hide_pet);
+        let _ = menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::ResetPosition),
+            "Reset position",
+            true,
+            None,
+        ));
+
+        let _ = menu.append(&PredefinedMenuItem::separator());
+        let _ = menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::InstallHooks),
+            "Install Claude Code hooks…",
+            true,
+            None,
+        ));
+        let _ = menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::InstallMcp),
+            "Install MCP server for Claude chat…",
+            true,
+            None,
+        ));
+        let start_at_login = CheckMenuItem::with_id(
+            menu_id_for(&MenuAction::ToggleStartAtLogin),
+            "Start at login",
+            true,
+            model.start_at_login,
+            None,
+        );
+        let _ = menu.append(&start_at_login);
+        let _ = menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::OpenHookLog),
+            "Open hook log",
+            true,
+            None,
+        ));
+
+        let _ = menu.append(&PredefinedMenuItem::separator());
+        let _ = menu.append(&MenuItem::with_id(
+            menu_id_for(&MenuAction::Quit),
+            "Quit Claude Airou",
+            true,
+            Some(tray_icon::menu::accelerator::Accelerator::new(
+                Some(tray_icon::menu::accelerator::Modifiers::META),
+                tray_icon::menu::accelerator::Code::KeyQ,
+            )),
+        ));
+
+        TrayMenu {
+            menu,
+            header,
+            usage,
+            automatic,
+            session_rows,
+            gauge_items,
+            expand,
+            pet_items,
+            size_items,
+            bubbles,
+            aura,
+            shadows,
+            click_through,
+            hide_pet,
+            start_at_login,
+        }
     }
-    let _ = menu.append(&size_menu);
 
-    let _ = menu.append(&PredefinedMenuItem::separator());
+    /// Refreshes texts and check marks in place — valid only while `same_menu_structure`
+    /// holds between the model this menu was built from and `model`.
+    pub fn apply(&self, model: &MenuModel) {
+        self.header.set_text(&model.header);
+        if let (Some(item), Some(usage_line)) = (&self.usage, &model.usage_line) {
+            item.set_text(usage_line);
+        }
+        if let Some(automatic) = &self.automatic {
+            automatic.set_checked(model.is_following_automatically);
+        }
+        for (item, row) in self.session_rows.iter().zip(&model.sessions) {
+            item.set_text(&row.title);
+            item.set_checked(row.is_pinned);
+        }
+        for (metric, item) in &self.gauge_items {
+            item.set_checked(*metric == model.gauge_metric);
+        }
+        self.expand.set_checked(model.always_expanded);
+        for (item, (_, _, is_selected)) in self.pet_items.iter().zip(&model.pets) {
+            item.set_checked(*is_selected);
+        }
+        let nearest = nearest_size_option(model.pixel_scale);
+        for (scale, item) in &self.size_items {
+            item.set_checked(*scale == nearest);
+        }
+        self.bubbles.set_checked(model.bubbles_hidden);
+        self.aura.set_checked(model.effort_aura_hidden);
+        self.shadows.set_checked(model.agent_shadows_hidden);
+        self.click_through.set_checked(model.click_through);
+        self.hide_pet.set_text(if model.pet_hidden { "Show pet" } else { "Hide pet" });
+        self.start_at_login.set_checked(model.start_at_login);
+    }
+}
 
-    let bubbles = CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleBubbles),
-        "Hide speech bubbles",
-        true,
-        model.bubbles_hidden,
-        None,
-    );
-    let _ = menu.append(&bubbles);
-    let aura = CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleEffortAura),
-        "Hide effort aura",
-        true,
-        model.effort_aura_hidden,
-        None,
-    );
-    let _ = menu.append(&aura);
-    let shadows = CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleAgentShadows),
-        "Hide agent shadows",
-        true,
-        model.agent_shadows_hidden,
-        None,
-    );
-    let _ = menu.append(&shadows);
-    let click_through = CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleClickThrough),
-        "Click-through (ignore mouse)",
-        true,
-        model.click_through,
-        None,
-    );
-    let _ = menu.append(&click_through);
-    let hide = MenuItem::with_id(
-        menu_id_for(&MenuAction::TogglePetHidden),
-        if model.pet_hidden { "Show pet" } else { "Hide pet" },
-        true,
-        None,
-    );
-    let _ = menu.append(&hide);
-    let _ = menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::ResetPosition),
-        "Reset position",
-        true,
-        None,
-    ));
-
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::InstallHooks),
-        "Install Claude Code hooks…",
-        true,
-        None,
-    ));
-    let _ = menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::InstallMcp),
-        "Install MCP server for Claude chat…",
-        true,
-        None,
-    ));
-    let _ = menu.append(&CheckMenuItem::with_id(
-        menu_id_for(&MenuAction::ToggleStartAtLogin),
-        "Start at login",
-        true,
-        model.start_at_login,
-        None,
-    ));
-    let _ = menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::OpenHookLog),
-        "Open hook log",
-        true,
-        None,
-    ));
-
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&MenuItem::with_id(
-        menu_id_for(&MenuAction::Quit),
-        "Quit Claude Airou",
-        true,
-        Some(tray_icon::menu::accelerator::Accelerator::new(
-            Some(tray_icon::menu::accelerator::Modifiers::META),
-            tray_icon::menu::accelerator::Code::KeyQ,
-        )),
-    ));
-
-    menu
+/// One-shot build for the right-click context menu, which is rebuilt fresh every time it
+/// opens and so has no use for the handles.
+pub fn build_menu(model: &MenuModel) -> Menu {
+    TrayMenu::build(model).menu
 }
 
 /// A small paw-print bitmap, drawn programmatically (no assets): one big pad + three
@@ -429,6 +541,71 @@ pub fn paw_icon_rgba(size: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn model_fixture() -> MenuModel {
+        MenuModel {
+            header: "Boo · proj: Working".to_string(),
+            usage_line: Some("ctx 60% left".to_string()),
+            sessions: vec![
+                SessionMenuRow { session_id: "s1".into(), title: "proj — Working".into(), is_pinned: false },
+                SessionMenuRow { session_id: "s2".into(), title: "other — Done".into(), is_pinned: true },
+            ],
+            is_following_automatically: false,
+            pets: vec![("boo-ghost".into(), "Boo".into(), true)],
+            pixel_scale: 5.0,
+            gauge_metric: GaugeMetric::ContextRemaining,
+            always_expanded: false,
+            bubbles_hidden: false,
+            click_through: false,
+            pet_hidden: false,
+            effort_aura_hidden: false,
+            agent_shadows_hidden: false,
+            start_at_login: true,
+        }
+    }
+
+    #[test]
+    fn text_and_check_changes_keep_the_menu_structure() {
+        // Everything that changes on a busy tick must be updatable in place: replacing
+        // the menu for these is what killed clicks while it was open.
+        let base = model_fixture();
+        let mut ticked = base.clone();
+        ticked.header = "Boo · proj: Thinking".to_string();
+        ticked.usage_line = Some("ctx 59% left".to_string());
+        ticked.sessions[0].title = "proj — Thinking".to_string();
+        ticked.sessions[1].is_pinned = false;
+        ticked.is_following_automatically = true;
+        ticked.pixel_scale = 7.0;
+        ticked.gauge_metric = GaugeMetric::Off;
+        ticked.pet_hidden = true;
+        ticked.start_at_login = false;
+        assert!(same_menu_structure(&base, &ticked));
+    }
+
+    #[test]
+    fn row_changes_break_the_menu_structure() {
+        let base = model_fixture();
+
+        let mut session_gone = base.clone();
+        session_gone.sessions.pop();
+        assert!(!same_menu_structure(&base, &session_gone));
+
+        let mut session_swapped = base.clone();
+        session_swapped.sessions[0].session_id = "s9".into();
+        assert!(!same_menu_structure(&base, &session_swapped));
+
+        let mut usage_gone = base.clone();
+        usage_gone.usage_line = None;
+        assert!(!same_menu_structure(&base, &usage_gone));
+
+        let mut pet_added = base.clone();
+        pet_added.pets.push(("mochi-cat".into(), "Mochi".into(), false));
+        assert!(!same_menu_structure(&base, &pet_added));
+
+        let mut pet_renamed = base.clone();
+        pet_renamed.pets[0].1 = "Boo  (custom)".into();
+        assert!(!same_menu_structure(&base, &pet_renamed));
+    }
 
     #[test]
     fn menu_ids_round_trip() {
