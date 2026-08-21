@@ -220,6 +220,7 @@ pub fn run_overlay(config: AppConfig, library: PetLibrary, pet: PetDefinition) -
         theme: Theme::for_appearance(true, None, None),
         tray_icon: None,
         menu_model: None,
+        tray_menu: None,
         context_menu: None,
         next_tick: Instant::now() + TICK,
         next_animation_frame: None,
@@ -270,6 +271,9 @@ struct App {
     theme: Theme,
     tray_icon: Option<tray_icon::TrayIcon>,
     menu_model: Option<tray::MenuModel>,
+    /// Handles into the tray menu, so ticks update items in place instead of replacing
+    /// the menu — a replaced menu goes dead under the user's open click.
+    tray_menu: Option<tray::TrayMenu>,
     /// The right-click menu currently shown (kept alive while it is up).
     context_menu: Option<tray_icon::menu::Menu>,
     next_tick: Instant,
@@ -472,16 +476,17 @@ impl App {
             super::log("tray: could not build the paw icon");
             return;
         };
-        let menu = tray::build_menu(&self.current_menu_model());
+        let built = tray::TrayMenu::build(&self.current_menu_model());
         match tray_icon::TrayIconBuilder::new()
             .with_icon(icon)
             .with_icon_as_template(true)
             .with_tooltip("Claude Airou")
-            .with_menu(Box::new(menu))
+            .with_menu(Box::new(built.menu.clone()))
             .build()
         {
             Ok(tray_icon) => {
                 self.menu_model = Some(self.current_menu_model());
+                self.tray_menu = Some(built);
                 self.tray_icon = Some(tray_icon);
             }
             Err(error) => super::log(&format!("tray: could not create the status item: {error}")),
@@ -527,7 +532,21 @@ impl App {
         if self.menu_model.as_ref() == Some(&fresh) {
             return;
         }
-        tray_icon.set_menu(Some(Box::new(tray::build_menu(&fresh))));
+        let can_update_in_place = match (&self.menu_model, &self.tray_menu) {
+            (Some(previous), Some(_)) => tray::same_menu_structure(previous, &fresh),
+            _ => false,
+        };
+        if can_update_in_place {
+            if let Some(tray_menu) = &self.tray_menu {
+                tray_menu.apply(&fresh);
+            }
+        } else {
+            // Rows came or went (a session, a pet, the usage line): the menu really has to
+            // be rebuilt, and an open menu goes dead for that one moment.
+            let built = tray::TrayMenu::build(&fresh);
+            tray_icon.set_menu(Some(Box::new(built.menu.clone())));
+            self.tray_menu = Some(built);
+        }
         self.menu_model = Some(fresh);
     }
 
